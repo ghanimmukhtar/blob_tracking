@@ -1,0 +1,6 @@
+<launch>  
+  <rosparam command="load" file="$(find blob_tracking)/launch/params/global_params.yml"/>
+  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" launch-prefix="gdb -ex run -remove-args"-->
+  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" >
+  </node>
+</launch>
