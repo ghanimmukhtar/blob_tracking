@@ -23,51 +23,11 @@ public:
         init();
     }
 
-    void set_parameters(){
-        with_params = static_cast<bool>(_parameters["with_params"]);
-        _detector_params.filterByColor = static_cast<bool>(_parameters["filter_by_color"]);
-        _detector_params.blobColor = std::stoi(_parameters["color"]) ;
-
-        _detector_params.filterByArea = static_cast<bool>(_parameters["filter_by_area"]) ;
-        _detector_params.minArea = std::stod(_parameters["min_area"]) ;
-        _detector_params.maxArea = std::stod(_parameters["max_area"]) ;
-
-        _detector_params.filterByConvexity = static_cast<bool>(_parameters["filter_by_convexity"]) ;
-        _detector_params.minConvexity = std::stod(_parameters["min_convexity"]) ;
-
-        _detector_params.filterByInertia = static_cast<bool>(_parameters["filter_by_inertia"]) ;
-        _detector_params.maxInertiaRatio = std::stod(_parameters["min_inertia"]) ;
-
-        _detector_params.filterByCircularity = static_cast<bool>(_parameters["filter_by_circularity"]) ;
-        _detector_params.minCircularity = std::stod(_parameters["min_circularity"]) ;
-
-        _detector_params.minThreshold = std::stod(_parameters["min_threshold"]) ;
-        _detector_params.maxThreshold = std::stod(_parameters["max_threshold"]) ;
-
-        _detector_params.minRepeatability = std::stod(_parameters["repeatability"]) ;
-    }
-
-
     void init(){
         image_transport::ImageTransport it_(_nh);
         _rgb_image_sub = it_.subscribe("/camera/rgb/image_raw", 1, &Blob_detector::blob_detect_and_publish_cb, this);
-        _depth_image_sub = it_.subscribe("/camera/depth/image_raw", 1, &Blob_detector::depth_processing_cb, this);
-        _camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/camera/rgb/camera_info", 1, &Blob_detector::camera_info_cb, this);
-
-        _nh.getParam("/", _parameters);
-        set_parameters();
-
-        if(with_params)
-            _detector.reset(new SimpleBlobDetector(_detector_params));
-        else
-            _detector.reset(new SimpleBlobDetector);
-
-        std::vector<std::string> params;
-        _detector->getParams(params);
-
-        for(size_t i = 0; i < params.size(); i++)
-            ROS_WARN_STREAM("Element: " << i << " for params matrix is: " << params[i]
-                            << " and its value should be: " << _detector->getDouble(params[i]));
+        //_depth_image_sub = it_.subscribe("/camera/depth/image_raw", 1, &Blob_detector::depth_processing_cb, this);
+        //_camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/camera/rgb/camera_info", 1, &Blob_detector::camera_info_cb, this);
 
         ros::AsyncSpinner my_spinner(1);
         my_spinner.start();
@@ -82,16 +42,22 @@ public:
             cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
             //cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::TYPE_32FC1);
             _im = cv_ptr->image;
-            _detector->detect( _im, _keypoints);
-            drawKeypoints( _im, _keypoints, _im_with_keypoints, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
-            // Show blobs
-            imshow("Showblobs", _im_with_keypoints );
+            _im_original = _im.clone();
 
-            if(!_keypoints.empty()){
-                _test = _keypoints[0];
-                //ROS_WARN_STREAM("first keypoint: " << test.pt);
-            }
-            waitKey(10);
+            medianBlur(_im, _im, 3);
+            cvtColor(_im, _im_hsv, COLOR_BGR2HSV);
+
+            //red color detection
+            inRange(_im_hsv, Scalar(160, 100, 100), Scalar(179, 255, 255), _im_red_hue);
+
+            //green color detection
+            //inRange(_im_hsv, Scalar(50, 100, 100), Scalar(70, 255, 255), _im_red_hue);
+
+            //addWeighted(_im_lower_red_hue, 1.0, _im_upper_red_hue, 1.0, 0.0, _im_red_hue);
+            GaussianBlur(_im_red_hue, _im_red_hue, Size(9, 9), 2, 2);
+            HoughCircles(_im_red_hue, _circles, CV_HOUGH_GRADIENT, 1, _im_red_hue.rows, 100, 20, 0, 0);
+
+            show_all_images();
         }
         catch (...)
         {
@@ -101,14 +67,35 @@ public:
 
     }
 
+    void show_all_images(){
+        //for(size_t i = 0; i < _circles.size(); i++)
+        if(!_circles.empty()){
+            Point center(std::round(_circles[0][0]), std::round(_circles[0][1]));
+            int radius_c = std::round(_circles[0][2]);
+
+            circle(_im_original, center, radius_c, Scalar(255, 0, 0), 5);
+        }
+
+        //cv::namedWindow("Threshold lower image", cv::WINDOW_AUTOSIZE);
+        //cv::imshow("Threshold lower image", _im_lower_red_hue);
+        //cv::namedWindow("Threshold upper image", cv::WINDOW_AUTOSIZE);
+        //cv::imshow("Threshold upper image", _im_upper_red_hue);
+        cv::namedWindow("Combined threshold images", cv::WINDOW_AUTOSIZE);
+        cv::imshow("Combined threshold images", _im_red_hue);
+        cv::namedWindow("Detected red circles on the input image", cv::WINDOW_AUTOSIZE);
+        cv::imshow("Detected red circles on the input image", _im_original);
+
+        waitKey(10);
+    }
+
     void depth_processing_cb(const sensor_msgs::ImageConstPtr& depth_msg){
-        if(!_keypoints.empty()){
+        if(!_circles.empty()){
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
 
             pcl::fromROSMsg(ptcl_msg, *input_cloud);
-            pcl::PointXYZRGBA pt = input_cloud->at((int) _test.pt.x + (int) _test.pt.y * input_cloud->width);
+            pcl::PointXYZRGBA pt = input_cloud->at(std::round(_circles[0][0]) + std::round(_circles[0][1]) * input_cloud->width);
             _p_z = pt.z;
             _p_x = pt.x;
             _p_y = pt.y;
@@ -133,16 +120,10 @@ private:
     image_transport::Subscriber _rgb_image_sub, _depth_image_sub;
     ros::Subscriber _camera_info_sub;
     sensor_msgs::ImageConstPtr _rgb_msg;
-    Mat _im;
-    std::shared_ptr<SimpleBlobDetector> _detector;
-    std::vector<KeyPoint> _keypoints;
-    KeyPoint _test;
-    Mat _im_with_keypoints;
-    SimpleBlobDetector::Params _detector_params;
+    Mat _im, _im_original, _im_hsv, _im_lower_red_hue, _im_upper_red_hue, _im_red_hue;
+    std::vector<Vec3f> _circles;
     pcl::PointXYZRGBA _tracked_point;
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
-    bool filter_by_color, filter_by_area, filter_by_circularity, filter_by_convexity, filter_by_inertia, with_params;
-    double min_area, max_area, min_circularity, min_threshold, max_threshold, min_convexity, min_inertia;
     double _p_x, _p_y, _p_z;
     int color, repeatability;
 };
