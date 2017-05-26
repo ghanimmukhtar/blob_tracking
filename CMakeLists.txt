@@ -41,4 +41,4 @@ include_directories(
 )
 
 add_executable(blob_tracking src/blob_tracking.cpp)
-target_link_libraries(blob_tracking ${catkin_LIBRARIES} rgbd_utils ${PCL_LIBRARIES})
+target_link_libraries(blob_tracking ${catkin_LIBRARIES} ${PCL_LIBRARIES} rgbd_utils )
