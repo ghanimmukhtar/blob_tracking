@@ -33,6 +33,13 @@ public:
         _camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/camera/rgb/camera_info", 1, &Blob_detector::camera_info_cb, this);
 
 
+        _nh.getParam("/", _parameters);
+        _lower_1 = std::stod(_parameters["lower_1"]);
+        _lower_2 = std::stod(_parameters["lower_2"]);
+        _lower_3 = std::stod(_parameters["lower_3"]);
+        _upper_1 = std::stod(_parameters["upper_1"]);
+        _upper_2 = std::stod(_parameters["upper_2"]);
+        _upper_3 = std::stod(_parameters["upper_3"]);
         _output_file.open("ball_trajectory.csv", std::ofstream::out);
         _quat_angles.setW(0.5);
         _quat_angles.setX(0.5);
@@ -62,15 +69,38 @@ public:
             cvtColor(_im, _im_hsv, COLOR_BGR2HSV);
 
             //red color detection
-            inRange(_im_hsv, Scalar(160, 100, 100), Scalar(179, 255, 255), _im_red_hue);
+            inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3), Scalar(_upper_1, _upper_2, _upper_3), _im_red_hue);
 
             //green color detection
             //inRange(_im_hsv, Scalar(50, 100, 100), Scalar(70, 255, 255), _im_red_hue);
 
             //addWeighted(_im_lower_red_hue, 1.0, _im_upper_red_hue, 1.0, 0.0, _im_red_hue);
-            GaussianBlur(_im_red_hue, _im_red_hue, Size(9, 9), 2, 2);
-            HoughCircles(_im_red_hue, _circles, CV_HOUGH_GRADIENT, 1, _im_red_hue.rows, 100, 20, 0, 0);
+            GaussianBlur(_im_red_hue, _im_red_hue,
+                         Size(std::stoi(_parameters["gaussian_size_1"]), std::stoi(_parameters["gaussian_size_2"])),
+                         std::stod(_parameters["gaussian_sigmax"]), std::stod(_parameters["gaussian_sigmay"]));
+            HoughCircles(_im_red_hue, _circles, CV_HOUGH_GRADIENT, 1, _im_red_hue.rows,
+                         std::stod(_parameters["houghcircles_param_1"]),
+                    std::stod(_parameters["houghcircles_param_2"]), 0, 0);
 
+
+            /*for(size_t i = 0; i < _im_red_hue.size.; i++){
+            if(!_circles.empty()){
+                //Vec3b hsv_values = _im_hsv.at<Vec3b>(_im_red_hue.rows/2.0, _im_red_hue.cols/2.0);
+                Vec3b hsv_values = _im_hsv.at<Vec3b>(_circles[0][0], _circles[0][1]);
+                int H = hsv_values.val[0];
+                int S = hsv_values.val[1];
+                int V = hsv_values.val[2];
+                /*
+                ROS_WARN_STREAM("for circle no: " << i << " HUE is: " << H);
+                ROS_WARN_STREAM("for circle no: " << i << " SATURATION is: " << S);
+                ROS_WARN_STREAM("for circle no: " << i << " VALUE is: " << V);
+                *
+                ROS_WARN_STREAM( " HUE is: " << H);
+                ROS_WARN_STREAM( " SATURATION is: " << S);
+                ROS_WARN_STREAM( " VALUE is: " << V);
+                ROS_INFO("*************************************************");
+            }
+            //}*/
             show_all_images();
         }
         catch (...)
@@ -99,8 +129,8 @@ public:
         //cv::imshow("Threshold lower image", _im_lower_red_hue);
         //cv::namedWindow("Threshold upper image", cv::WINDOW_AUTOSIZE);
         //cv::imshow("Threshold upper image", _im_upper_red_hue);
-        //cv::namedWindow("Combined threshold images", cv::WINDOW_AUTOSIZE);
-        //cv::imshow("Combined threshold images", _im_red_hue);
+        cv::namedWindow("Combined threshold images", cv::WINDOW_AUTOSIZE);
+        cv::imshow("Combined threshold images", _im_red_hue);
         cv::namedWindow("Detected red circles on the input image", cv::WINDOW_AUTOSIZE);
         cv::imshow("Detected red circles on the input image", _im_original);
 
@@ -119,7 +149,6 @@ public:
 
     void depth_processing_cb(const sensor_msgs::ImageConstPtr& depth_msg){
         if(!_circles.empty() && !_im.empty() && !depth_msg->data.empty()){
-
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
@@ -147,6 +176,7 @@ public:
                     record_ball_trajectory(_p_x, _p_y, _p_z);
             }
         }
+
     }
 
     void convert_point_from_optical_to_camera_frame(Eigen::Vector4d input_point, Eigen::Vector4d& output_point){
@@ -171,7 +201,7 @@ private:
     tf::Quaternion _quat_angles;
     tf::Matrix3x3 _rotation_matrix;
     Eigen::Matrix4d _T_o_c;
-    double _p_x, _p_y, _p_z;
+    double _p_x, _p_y, _p_z, _lower_1, _lower_2, _lower_3, _upper_1, _upper_2, _upper_3;
     int color, repeatability;
 };
 
