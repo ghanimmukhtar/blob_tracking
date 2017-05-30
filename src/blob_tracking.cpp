@@ -17,6 +17,7 @@
 #include <rgbd_utils/rgbd_to_pointcloud.h>
 
 #include <tf/tf.h>
+#include <tf/transform_listener.h>
 
 using namespace cv;
 
@@ -30,8 +31,11 @@ public:
         image_transport::ImageTransport it_(_nh);
         _rgb_image_sub = it_.subscribe("/camera/rgb/image_raw", 1, &Blob_detector::blob_detect_and_publish_cb, this);
         _depth_image_sub = it_.subscribe("/camera/depth/image_raw", 1, &Blob_detector::depth_processing_cb, this);
+        //_depth_point_cloud_sub = _nh.subscribe<sensor_msgs::PointCloud2>("/camera/depth/points", 1, &Blob_detector::depth_processing_cb, this);
         _camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/camera/rgb/camera_info", 1, &Blob_detector::camera_info_cb, this);
 
+        _ball_in_camera_frame.clear();
+        _ball_in_robot_frame.clear();
 
         _nh.getParam("/", _parameters);
         _lower_1 = std::stod(_parameters["lower_1"]);
@@ -72,7 +76,7 @@ public:
             inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3), Scalar(_upper_1, _upper_2, _upper_3), _im_red_hue);
 
             //green color detection
-            //inRange(_im_hsv, Scalar(50, 100, 100), Scalar(70, 255, 255), _im_red_hue);
+            inRange(_im_hsv, Scalar(128, 178, 128), Scalar(255, 255, 255), _im_red_hue);
 
             //addWeighted(_im_lower_red_hue, 1.0, _im_upper_red_hue, 1.0, 0.0, _im_red_hue);
             GaussianBlur(_im_red_hue, _im_red_hue,
@@ -134,17 +138,20 @@ public:
         cv::namedWindow("Detected red circles on the input image", cv::WINDOW_AUTOSIZE);
         cv::imshow("Detected red circles on the input image", _im_original);
 
-        waitKey(10);
+        waitKey(1);
     }
 
     void record_ball_trajectory(double p_x, double p_y, double p_z){
         //ROS_INFO("I am recording into the file!!");
-        Eigen::Vector4d point_in_optical_frame, point_in_camera_frame;
+        /*Eigen::Vector4d point_in_optical_frame, point_in_camera_frame;
         point_in_optical_frame << p_x, p_y, p_z, 1;
         convert_point_from_optical_to_camera_frame(point_in_optical_frame, point_in_camera_frame);
         _output_file << point_in_camera_frame(0) << ","
                      << point_in_camera_frame(1) << ","
-                     << point_in_camera_frame(2) << "\n";
+                     << point_in_camera_frame(2) << "\n";*/
+        _output_file << p_x << ","
+                     << p_y << ","
+                     << p_z << "\n";
     }
 
     void depth_processing_cb(const sensor_msgs::ImageConstPtr& depth_msg){
@@ -152,28 +159,28 @@ public:
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
-            pcl::PointCloud<pcl::PointXYZRGBA>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+            /*pcl::PointCloud<pcl::PointXYZRGBA>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
             pcl::PassThrough<pcl::PointXYZRGBA> pass;
             pass.setInputCloud(input_cloud);
             pass.setFilterFieldName("z");
             //pass.setFilterLimits(0, 1.1);
-            pass.filter(*output_cloud);
+            pass.filter(*output_cloud);*/
 
-            pcl::fromROSMsg(ptcl_msg, *output_cloud);
-            if(!output_cloud->empty()){
-                pcl::PointXYZRGBA pt = output_cloud->at(std::round(_circles[0][0]) + std::round(_circles[0][1]) * output_cloud->width);
-                _p_z = pt.z;
+            pcl::fromROSMsg(ptcl_msg, *input_cloud);
+            if(!input_cloud->empty()){
+                pcl::PointXYZRGBA pt = input_cloud->at(std::round(_circles[0][0]) + std::round(_circles[0][1]) * input_cloud->width);
+                /*_p_z = pt.z;
                 _p_x = pt.x;
                 _p_y = pt.y;
-                /*ROS_WARN_STREAM("Coordinates of the first keypoint are: ");
+                ROS_WARN_STREAM("Coordinates of the first keypoint are: ");
                 ROS_INFO_STREAM("For x: " << _p_x);
                 ROS_INFO_STREAM("For y: " << _p_y);
                 ROS_INFO_STREAM("For z: " << _p_z);
                 ROS_INFO_STREAM("For P_x: " << std::round(_circles[0][0]));
                 ROS_INFO_STREAM("For P_y: " << std::round(_circles[0][1]));
                 ROS_WARN("******************************************************");*/
-                if(_p_x == _p_x && _p_y == _p_y && _p_z == _p_z)
-                    record_ball_trajectory(_p_x, _p_y, _p_z);
+                if(pt.x == pt.x && pt.y == pt.y && pt.z == pt.z)
+                    record_ball_trajectory(pt.x, pt.y, pt.z);
             }
         }
 
@@ -191,10 +198,11 @@ private:
     ros::NodeHandle _nh;
     XmlRpc::XmlRpcValue _parameters;
     image_transport::Subscriber _rgb_image_sub, _depth_image_sub;
-    ros::Subscriber _camera_info_sub;
+    ros::Subscriber _camera_info_sub, _depth_point_cloud_sub;
     sensor_msgs::ImageConstPtr _rgb_msg;
     Mat _im, _im_original, _im_hsv, _im_lower_red_hue, _im_upper_red_hue, _im_red_hue;
     std::vector<Vec3f> _circles;
+    std::vector<Eigen::Vector3d> _ball_in_camera_frame, _ball_in_robot_frame;
     pcl::PointXYZRGBA _tracked_point;
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
     std::ofstream _output_file;
