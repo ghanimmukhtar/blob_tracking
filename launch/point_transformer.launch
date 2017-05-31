@@ -1,15 +1,12 @@
 <launch>  
   <!--arg name="camera_link_pose" default="0.253 -0.02 0.9 -0.001 0.448 0.010 0.894"/>
  
-  <include file="$(find freenect_launch)/launch/freenect.launch">
-    <arg name="rgb_frame_id" value="camera_rgb_optical_frame"/>
-    <arg name="depth_frame_id" value="camera_depth_optical_frame"/>
-  </include>
- 
   <node name="statict_transform" pkg="tf" type="static_transform_publisher" args=" $(arg camera_link_pose) /base /camera_link 100"/-->
 
-  <param name="input_file" value="/home/mukhtar/.ros/ball_trajectory.csv"/>
-  <!--node name="points_transformer_node" pkg="blob_tracking" type="points_transformer" output="screen" launch-prefix="gdb -ex run -remove-args"-->
+  <param name="input_file" value="/home/ghanim/ros_home/"/>
+  <!--param name="input_file" value="/home/mukhtar/.ros/"/-->
+  <param name="number_of_trajectory_files" value="6"/>
+  <!--node name="points_transformer_node" pkg="blob_tracking" type="points_transformer" output="screen" launch-prefix="gdb -ex run -r-args"-->
   <node name="points_transformer_node" pkg="blob_tracking" type="points_transformer" output="screen" >
   </node>
 </launch>
