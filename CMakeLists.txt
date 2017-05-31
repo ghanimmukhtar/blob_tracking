@@ -15,6 +15,8 @@ find_package(catkin REQUIRED COMPONENTS
   tf
 )
 
+catkin_python_setup()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -fPIC")
 
 find_package(Eigen3 REQUIRED)
@@ -29,6 +31,8 @@ include_directories(${EIGEN3_INCLUDE_DIR} ${PCL_INCLUDE_DIRS} /usr/local/include
 link_directories(${PCL_LIBRARY_DIRS} /usr/local/lib)
 add_definitions(${PCL_DEFINITIONS})
 
+
+
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES blob_tracking
@@ -41,8 +45,13 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(blob_tracking src/blob_tracking.cpp)
-target_link_libraries(blob_tracking ${catkin_LIBRARIES} ${PCL_LIBRARIES} rgbd_utils )
+install(PROGRAMS
+   scripts/blob_tracking
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
+
+add_executable(blob_tracking_2 src/blob_tracking.cpp)
+target_link_libraries(blob_tracking_2 ${catkin_LIBRARIES} ${PCL_LIBRARIES} rgbd_utils )
 
 add_executable(points_transformer src/points_transformer.cpp)
 target_link_libraries(points_transformer ${catkin_LIBRARIES} )
