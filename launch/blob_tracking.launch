@@ -1,6 +1,14 @@
 <launch>  
+  <include file="$(find freenect_launch)/launch/freenect.launch">
+    <!-- These args are workarounds for tf_prefix issues in freenect.launch -->
+    <arg name="rgb_frame_id" value="camera_rgb_optical_frame"/>
+    <arg name="depth_frame_id" value="camera_depth_optical_frame"/>
+  </include>
+
+  <node name="ball_tracking_node" pkg="blob_tracking" type="ball_tracking_ros.py" output="screen" />
+
   <rosparam command="load" file="$(find blob_tracking)/launch/params/global_params.yml"/>
-  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" launch-prefix="gdb -ex run -remove-args"-->
-  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" >
+  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking_2" output="screen" launch-prefix="gdb -ex run -r-args"-->
+  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking_2" output="screen" >
   </node>
 </launch>

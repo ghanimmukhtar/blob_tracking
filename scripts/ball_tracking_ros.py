@@ -23,12 +23,6 @@ class ball_tracker:
     self.image_sub = rospy.Subscriber("/camera/rgb/image_raw", Image, self.callback)
 
   def callback(self,data):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("-v", "--video",
-	help="path to the (optional) video file")
-    ap.add_argument("-b", "--buffer", type=int, default=64,
-	help="max buffer size")
-    args = vars(ap.parse_args())
     # define the lower and upper boundaries of the "green"
     # ball in the HSV color space, then initialize the
     # list of tracked points
@@ -37,7 +31,8 @@ class ball_tracker:
 
     #greenLower = (150, 100, 140)
     #greenUpper = (190, 255, 255)
-    pts = deque(maxlen=args["buffer"])
+    pts = deque(maxlen=64)
+
     try:
       frame = self.bridge.imgmsg_to_cv2(data, "bgr8")
     except CvBridgeError as e:
@@ -92,7 +87,7 @@ class ball_tracker:
  
 	# otherwise, compute the thickness of the line and
 	# draw the connecting lines
-	thickness = int(np.sqrt(args["buffer"] / float(i + 1)) * 2.5)
+	thickness = int(np.sqrt(64.0 / float(i + 1)) * 2.5)
 	cv2.line(frame, pts[i - 1], pts[i], (0, 0, 255), thickness)
  
     # show the frame to our screen
