@@ -72,7 +72,7 @@ public:
             cvtColor(_im, _im_hsv, COLOR_BGR2HSV);
 
             //red color detection
-            inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3), Scalar(_upper_1, _upper_2, _upper_3), _im_red_hue);
+            inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3, 0), Scalar(_upper_1, _upper_2, _upper_3, 0), _im_red_hue);
 
             Canny(_im_red_hue, _canny_output, 300, 500);
             findContours(_canny_output, _contour, _hierarchy, RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
@@ -93,18 +93,20 @@ public:
 
 
             minEnclosingCircle(_contour[largest_contour_index], _center, _radius);
-            if(_radius > 10){
+            if(_radius > 5){
                 Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
                 drawContours( drawing, _contour, largest_contour_index, color, 2, 8, _hierarchy, 0, Point() );
                 ROS_WARN_STREAM("radius of largest contour is: " << _radius);
                 Vec3b hsv_values = _im_hsv.at<Vec3b>(_center.x, _center.y);
-                int H = hsv_values.val[0];
-                int S = hsv_values.val[1];
-                int V = hsv_values.val[2];
-                ROS_WARN_STREAM( " HUE is: " << H);
-                ROS_WARN_STREAM( " SATURATION is: " << S);
-                ROS_WARN_STREAM( " VALUE is: " << V);
-                ROS_INFO("******************************");
+
+                    int H = hsv_values.val[0];
+                    int S = hsv_values.val[1];
+                    int V = hsv_values.val[2];
+                    ROS_WARN_STREAM( " HUE is: " << H);
+                    ROS_WARN_STREAM( " SATURATION is: " << S);
+                    ROS_WARN_STREAM( " VALUE is: " << V);
+                    ROS_INFO("******************************");
+
                 /// Show in a window
                 namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
                 imshow( "Contours", drawing );
