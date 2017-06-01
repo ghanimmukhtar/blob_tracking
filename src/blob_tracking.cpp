@@ -35,13 +35,12 @@ public:
         _rgb_image_sub = it_.subscribe("/camera/rgb/image_raw", 1, &Blob_detector::blob_detect_and_publish_cb, this);
         _depth_image_sub = it_.subscribe("/camera/depth/image_raw", 1, &Blob_detector::depth_processing_cb, this);
         _camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/camera/rgb/camera_info", 1, &Blob_detector::camera_info_cb, this);
-        _ball_center_sub = _nh.subscribe<std_msgs::Float64MultiArray>("/ball_center", 1, &Blob_detector::ball_center_cb, this);
+        _ball_center_sub = _nh.subscribe<std_msgs::Float64MultiArray>("/ball_center", 100, &Blob_detector::ball_center_cb, this);
         _start_recording_sub = _nh.subscribe<std_msgs::Bool>("/record_ball_trajectory", 1, &Blob_detector::start_recording_cb, this);
         _trajectory_index_sub = _nh.subscribe<std_msgs::Int64>("/trajectory_index", 1, &Blob_detector::trajectory_index_cb, this);
 
         _record = false;
         _nh.getParam("/", _parameters);
-        _output_file.open("ball_trajectory.csv", std::ofstream::out);
 
         ros::AsyncSpinner my_spinner(1);
         my_spinner.start();
@@ -67,6 +66,7 @@ public:
     }
 
     void record_ball_trajectory(double p_x, double p_y, double p_z){
+        ROS_WARN_STREAM("I am recording for file: " << _trajectory_index);
         _output_file << p_x << ","
                      << p_y << ","
                      << p_z << "\n";
@@ -82,7 +82,7 @@ public:
     }
 
     void depth_processing_cb(const sensor_msgs::ImageConstPtr& depth_msg){
-        if(!_ball_center.empty() && !depth_msg->data.empty()){
+        if(!_ball_center.empty() && !depth_msg->data.empty() && _record){
         //if(!depth_msg->data.empty()){
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
