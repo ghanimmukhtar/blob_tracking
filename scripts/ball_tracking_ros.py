@@ -75,6 +75,10 @@ class ball_tracker:
 		cv2.circle(frame, (int(x), int(y)), int(radius),
 			(0, 255, 255), 2)
 		cv2.circle(frame, center, 5, (0, 0, 255), -1)
+                print(hsv[x, y, 0])
+   	 	print(hsv[x, y, 1])
+    		print(hsv[x, y, 2])
+                print('**************************************')
  
     # update the points queue
     pts.appendleft(center)
@@ -92,6 +96,10 @@ class ball_tracker:
  
     # show the frame to our screen
     #cv2.imshow("Frame", frame)
+    
+    cv2.imwrite('hue.png', mask[0])
+    cv2.imwrite('sat.png', mask[1])
+    cv2.imwrite('val.png', mask[2])
     cv2.imshow("Mask", mask)
     key = cv2.waitKey(1) 
  
