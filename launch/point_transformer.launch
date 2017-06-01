@@ -1,4 +1,5 @@
-<launch>  
+<launch>   
+
   <param name="input_file" value="/home/mukhtar/.ros/ball_trajectory.csv"/>
   <!--node name="points_transformer_node" pkg="blob_tracking" type="points_transformer" output="screen" launch-prefix="gdb -ex run -remove-args"-->
   <node name="points_transformer_node" pkg="blob_tracking" type="points_transformer" output="screen" >
