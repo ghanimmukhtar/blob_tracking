@@ -44,6 +44,7 @@ public:
         _upper_1 = std::stod(_parameters["upper_1"]);
         _upper_2 = std::stod(_parameters["upper_2"]);
         _upper_3 = std::stod(_parameters["upper_3"]);
+        _radius = std::stod(_parameters["radius"]);
         _output_file.open("ball_trajectory.csv", std::ofstream::out);
         _quat_angles.setW(0.5);
         _quat_angles.setX(0.5);
@@ -62,11 +63,109 @@ public:
         _rgb_msg = msg;
         //namedWindow("Showblobs",CV_WINDOW_AUTOSIZE);
         cv_bridge::CvImagePtr cv_ptr;
+        Mat threshold_output;
+        vector<vector<Point> > contours;
+        vector<Vec4i> hierarchy;
+        int thresh = 100;
+        RNG rng(12345);
         try
         {
             cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
             _im = cv_ptr->image;
-            _im_original = _im.clone();
+            medianBlur(_im, _im, 3);
+            //blur(_im, _im, Size(3,3));
+            cvtColor(_im, _im_hsv, COLOR_BGR2HSV);
+
+            //red color detection
+            inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3, 0), Scalar(_upper_1, _upper_2, _upper_3, 0), _im_red_hue);
+
+            //cvtColor( _im, src_gray, CV_BGR2GRAY );
+            //blur( src_gray, src_gray, Size(3,3) );
+            /// Detect edges using Threshold
+            threshold( _im_red_hue, threshold_output, thresh, 255, THRESH_BINARY );
+
+            /// Find contours
+            findContours( threshold_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
+
+            /// Approximate contours to polygons + get bounding rects and circles
+            vector<vector<Point> > contours_poly( contours.size() );
+            vector<Rect> boundRect( contours.size() );
+            vector<Point2f>center( contours.size() );
+            vector<float>radius( contours.size() );
+
+            double largest_area = 0;
+            int largest_contour_index;
+
+            for(size_t i = 0; i < contours.size(); i++ )
+            {
+                double a = contourArea(contours[i]);
+                if(a > largest_area){
+                    largest_area = a;
+                    largest_contour_index = i;
+                }
+            }
+
+            Mat drawing = Mat::zeros( threshold_output.size(), CV_8UC3 );
+            if(contours.size() > 0){
+                approxPolyDP( Mat(contours[largest_contour_index]),
+                              contours_poly[largest_contour_index],
+                              3,
+                              true );
+                boundRect[largest_contour_index] = boundingRect( Mat(contours_poly[largest_contour_index]) );
+                minEnclosingCircle( (Mat)contours_poly[largest_contour_index],
+                                    center[largest_contour_index],
+                                    radius[largest_contour_index] );
+
+                Vec3b hsv_values = _im_hsv.at<Vec3b>(center[largest_contour_index].x,
+                                                     center[largest_contour_index].y);
+                int H = hsv_values.val[0];
+                int S = hsv_values.val[1];
+                int V = hsv_values.val[2];
+                if(radius[largest_contour_index] > _radius){
+                    Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+                    drawContours( drawing, contours_poly, largest_contour_index, color, 1, 8, vector<Vec4i>(), 0, Point() );
+                    rectangle( drawing,
+                               boundRect[largest_contour_index].tl(),
+                               boundRect[largest_contour_index].br(), color, 2, 8, 0 );
+                    circle( drawing, center[largest_contour_index],
+                            (int)radius[largest_contour_index], color, 2, 8, 0 );
+                    ROS_WARN_STREAM("contour number: " << largest_contour_index
+                                    << " is with elegible radius: " << radius[largest_contour_index]);
+
+
+
+
+                    ROS_WARN_STREAM( " HUE is: " << H);
+                    ROS_WARN_STREAM( " SATURATION is: " << S);
+                    ROS_WARN_STREAM( " VALUE is: " << V);
+                    ROS_INFO("******************************");
+                }
+            }
+            /*for( size_t i = 0; i < contours.size(); i++ )
+            { approxPolyDP( Mat(contours[i]), contours_poly[i], 3, true );
+                boundRect[i] = boundingRect( Mat(contours_poly[i]) );
+                minEnclosingCircle( (Mat)contours_poly[i], center[i], radius[i] );
+                if(radius[i] > _radius)
+                    ROS_WARN_STREAM("contour number: " << i << " is with elegible radius: " << radius[i]);
+            }*/
+
+            //ROS_WARN_STREAM("number of contours found is: " << contours.size());
+
+            /// Draw polygonal contour + bonding rects + circles
+
+            //for( size_t i = 0; i< contours.size(); i++ )
+            //{
+
+            //}
+
+            /// Show in a window
+            ///
+            cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
+            cv::imshow("Mask image", _im_red_hue);
+            namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
+            imshow( "Contours", drawing );
+            waitKey(1);
+            /*_im_original = _im.clone();
 
             medianBlur(_im, _im, 3);
             cvtColor(_im, _im_hsv, COLOR_BGR2HSV);
@@ -115,7 +214,7 @@ public:
 
                 waitKey(1);
             }
-            //show_all_images();
+            //show_all_images();*/
         }
         catch (...)
         {
