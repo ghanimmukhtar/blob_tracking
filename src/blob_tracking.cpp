@@ -65,7 +65,6 @@ public:
         try
         {
             cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-            //cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::TYPE_32FC1);
             _im = cv_ptr->image;
             _im_original = _im.clone();
 
@@ -75,37 +74,46 @@ public:
             //red color detection
             inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3), Scalar(_upper_1, _upper_2, _upper_3), _im_red_hue);
 
-            //green color detection
-            inRange(_im_hsv, Scalar(128, 178, 128), Scalar(255, 255, 255), _im_red_hue);
+            Canny(_im_red_hue, _canny_output, 300, 500);
+            findContours(_canny_output, _contour, _hierarchy, RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
 
-            //addWeighted(_im_lower_red_hue, 1.0, _im_upper_red_hue, 1.0, 0.0, _im_red_hue);
-            GaussianBlur(_im_red_hue, _im_red_hue,
-                         Size(std::stoi(_parameters["gaussian_size_1"]), std::stoi(_parameters["gaussian_size_2"])),
-                         std::stod(_parameters["gaussian_sigmax"]), std::stod(_parameters["gaussian_sigmay"]));
-            HoughCircles(_im_red_hue, _circles, CV_HOUGH_GRADIENT, 1, _im_red_hue.rows,
-                         std::stod(_parameters["houghcircles_param_1"]),
-                    std::stod(_parameters["houghcircles_param_2"]), 0, 0);
+            RNG rng(12345);
+            Mat drawing = Mat::zeros( _canny_output.size(), CV_8UC3 );
+            double largest_area = 0;
+            int largest_contour_index;
+
+            for(size_t i = 0; i < _contour.size(); i++ )
+            {
+                double a = contourArea(_contour[i]);
+                if(a > largest_area){
+                    largest_area = a;
+                    largest_contour_index = i;
+                }
+            }
 
 
-            /*for(size_t i = 0; i < _im_red_hue.size.; i++){
-            if(!_circles.empty()){
-                //Vec3b hsv_values = _im_hsv.at<Vec3b>(_im_red_hue.rows/2.0, _im_red_hue.cols/2.0);
-                Vec3b hsv_values = _im_hsv.at<Vec3b>(_circles[0][0], _circles[0][1]);
+            minEnclosingCircle(_contour[largest_contour_index], _center, _radius);
+            if(_radius > 10){
+                Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+                drawContours( drawing, _contour, largest_contour_index, color, 2, 8, _hierarchy, 0, Point() );
+                ROS_WARN_STREAM("radius of largest contour is: " << _radius);
+                Vec3b hsv_values = _im_hsv.at<Vec3b>(_center.x, _center.y);
                 int H = hsv_values.val[0];
                 int S = hsv_values.val[1];
                 int V = hsv_values.val[2];
-                /*
-                ROS_WARN_STREAM("for circle no: " << i << " HUE is: " << H);
-                ROS_WARN_STREAM("for circle no: " << i << " SATURATION is: " << S);
-                ROS_WARN_STREAM("for circle no: " << i << " VALUE is: " << V);
-                *
                 ROS_WARN_STREAM( " HUE is: " << H);
                 ROS_WARN_STREAM( " SATURATION is: " << S);
                 ROS_WARN_STREAM( " VALUE is: " << V);
-                ROS_INFO("*************************************************");
+                ROS_INFO("******************************");
+                /// Show in a window
+                namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
+                imshow( "Contours", drawing );
+                cv::namedWindow("Combined threshold images", cv::WINDOW_AUTOSIZE);
+                cv::imshow("Combined threshold images", _im_red_hue);
+
+                waitKey(1);
             }
-            //}*/
-            show_all_images();
+            //show_all_images();
         }
         catch (...)
         {
@@ -142,13 +150,6 @@ public:
     }
 
     void record_ball_trajectory(double p_x, double p_y, double p_z){
-        //ROS_INFO("I am recording into the file!!");
-        /*Eigen::Vector4d point_in_optical_frame, point_in_camera_frame;
-        point_in_optical_frame << p_x, p_y, p_z, 1;
-        convert_point_from_optical_to_camera_frame(point_in_optical_frame, point_in_camera_frame);
-        _output_file << point_in_camera_frame(0) << ","
-                     << point_in_camera_frame(1) << ","
-                     << point_in_camera_frame(2) << "\n";*/
         _output_file << p_x << ","
                      << p_y << ","
                      << p_z << "\n";
@@ -159,26 +160,10 @@ public:
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
-            /*pcl::PointCloud<pcl::PointXYZRGBA>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
-            pcl::PassThrough<pcl::PointXYZRGBA> pass;
-            pass.setInputCloud(input_cloud);
-            pass.setFilterFieldName("z");
-            //pass.setFilterLimits(0, 1.1);
-            pass.filter(*output_cloud);*/
 
             pcl::fromROSMsg(ptcl_msg, *input_cloud);
             if(!input_cloud->empty()){
-                pcl::PointXYZRGBA pt = input_cloud->at(std::round(_circles[0][0]) + std::round(_circles[0][1]) * input_cloud->width);
-                /*_p_z = pt.z;
-                _p_x = pt.x;
-                _p_y = pt.y;
-                ROS_WARN_STREAM("Coordinates of the first keypoint are: ");
-                ROS_INFO_STREAM("For x: " << _p_x);
-                ROS_INFO_STREAM("For y: " << _p_y);
-                ROS_INFO_STREAM("For z: " << _p_z);
-                ROS_INFO_STREAM("For P_x: " << std::round(_circles[0][0]));
-                ROS_INFO_STREAM("For P_y: " << std::round(_circles[0][1]));
-                ROS_WARN("******************************************************");*/
+                pcl::PointXYZRGBA pt = input_cloud->at(std::round(_center.x) + std::round(_center.y) * input_cloud->width);
                 if(pt.x == pt.x && pt.y == pt.y && pt.z == pt.z)
                     record_ball_trajectory(pt.x, pt.y, pt.z);
             }
@@ -200,8 +185,11 @@ private:
     image_transport::Subscriber _rgb_image_sub, _depth_image_sub;
     ros::Subscriber _camera_info_sub, _depth_point_cloud_sub;
     sensor_msgs::ImageConstPtr _rgb_msg;
-    Mat _im, _im_original, _im_hsv, _im_lower_red_hue, _im_upper_red_hue, _im_red_hue;
+    Mat _im, _im_original, _im_hsv, _im_lower_red_hue, _im_upper_red_hue, _im_red_hue, _canny_output;
     std::vector<Vec3f> _circles;
+    Point2f _center;
+    std::vector<std::vector<Point>> _contour;
+    std::vector<Vec4i> _hierarchy;
     std::vector<Eigen::Vector3d> _ball_in_camera_frame, _ball_in_robot_frame;
     pcl::PointXYZRGBA _tracked_point;
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
@@ -210,7 +198,9 @@ private:
     tf::Matrix3x3 _rotation_matrix;
     Eigen::Matrix4d _T_o_c;
     double _p_x, _p_y, _p_z, _lower_1, _lower_2, _lower_3, _upper_1, _upper_2, _upper_3;
+    float _radius;
     int color, repeatability;
+
 };
 
 int main(int argc, char **argv){
