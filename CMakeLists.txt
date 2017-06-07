@@ -17,8 +17,9 @@ find_package(catkin REQUIRED COMPONENTS
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -fPIC")
 
-find_package(Eigen3 REQUIRED)
+
 find_package(PCL 1.7 REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 include_directories(/usr/local/include)
 

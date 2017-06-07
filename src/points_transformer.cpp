@@ -9,6 +9,7 @@
 #include <Eigen/Core>
 #include <tf/tf.h>
 #include <tf/transform_listener.h>
+#include <tf/transform_broadcaster.h>
 
 using namespace std;
 
@@ -52,12 +53,14 @@ public:
 
     void init(){
         _nh.getParam("/input_file", _input_file_path);
+        _nh.getParam("/number_of_trajectory_files", _number_of_trajectory_files);
 
-        _input_file.open(_input_file_path, std::ios_base::in);
+        //_input_file.open(_input_file_path, std::ios_base::in);
         //_input_file();
-        _output_file.open("ball_trajectory_robot_frame.csv", std::ofstream::out);
-        construct_vector_from_file(_input_file);
-        transfrom_record_all_points(_points_in_camera_frame, _points_in_robot_frame);
+        //_output_file.open("ball_trajectory_robot_frame.csv", std::ofstream::out);
+        //construct_vector_from_file(_input_file);
+        //transfrom_record_all_points(_points_in_camera_frame, _points_in_robot_frame);
+        transform_record_all_trajectories();
     }
 
     void record_ball_trajectory(double p_x, double p_y, double p_z){
@@ -74,6 +77,7 @@ public:
         std::string child_frame = "/camera_depth_optical_frame";
         //std::string child_frame = "/camera_rgb_optical_frame";
         std::string parent_frame = "/world";
+        //std::string parent_frame = "/camera_link";
         try{
             listener.lookupTransform(child_frame, parent_frame,
                                      ros::Time::now(), stamped_transform);
@@ -109,11 +113,29 @@ public:
                      base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
         }
         catch(tf::TransformException& ex){
-            ROS_ERROR("Received an exception trying to transform a point from \"base_laser\" to \"base_link\": %s", ex.what());
+            ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
         }
         object_pose_in_robot_frame.push_back(base_point.point.x);
         object_pose_in_robot_frame.push_back(base_point.point.y);
         object_pose_in_robot_frame.push_back(base_point.point.z);
+    }
+
+    void transform_record_all_trajectories(){
+        if(_number_of_trajectory_files > 0){
+            for(int i = 1; i < _number_of_trajectory_files + 1; i++){
+                _input_file.open(_input_file_path + "ball_trajectory_no_" + std::to_string(i) + ".csv", std::ios_base::in);
+                _output_file.open("ball_trajectory_robot_frame_" + std::to_string(i) + ".csv", std::ofstream::out);
+                //_output_file.open("ball_trajectory_camera_frame_" + std::to_string(i) + ".csv", std::ofstream::out);
+                construct_vector_from_file(_input_file);
+                transfrom_record_all_points(_points_in_camera_frame, _points_in_robot_frame);
+                _input_file.close();
+                _output_file.close();
+                _points_in_camera_frame.clear();
+                _points_in_robot_frame.clear();
+            }
+        }
+        else
+            ROS_ERROR("No Trajectories to be transformed");
     }
 
     void transfrom_record_all_points(data_t& input, data_t& output){
@@ -122,7 +144,7 @@ public:
         for(size_t i = 0; i < input.size(); i++)
             tf_base_conversion(input[i], output[i]);
         for(size_t i = 0; i < output.size(); i++)
-            if(output[i][0] < 2.2)
+            //if(output[i][0] < 2.2)
                 record_ball_trajectory(output[i][0], output[i][1], output[i][2]);
     }
 
@@ -153,6 +175,7 @@ private:
     std::ifstream _input_file;
     data_t _points_in_camera_frame, _points_in_robot_frame;
     std::ofstream _output_file;
+    int _number_of_trajectory_files;
 };
 
 int main(int argc, char **argv){

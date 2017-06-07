@@ -92,7 +92,7 @@ public:
             }
 
             Mat drawing = Mat::zeros( threshold_output.size(), CV_8UC3 );
-            if(contours.size() > 0){
+            if(contours.size() > 0 && largest_contour_index < contours.size()){
                 approxPolyDP( Mat(contours[largest_contour_index]),
                               contours_poly[largest_contour_index],
                               3,
@@ -102,11 +102,11 @@ public:
                                     center[largest_contour_index],
                                     radius[largest_contour_index] );
 
-                Vec3b hsv_values = _im_hsv.at<Vec3b>(center[largest_contour_index].x,
-                                                     center[largest_contour_index].y);
-                int H = hsv_values.val[0];
-                int S = hsv_values.val[1];
-                int V = hsv_values.val[2];
+//                Vec3b hsv_values = _im_hsv.at<Vec3b>(center[largest_contour_index].x,
+//                                                     center[largest_contour_index].y);
+//                int H = hsv_values.val[0];
+//                int S = hsv_values.val[1];
+//                int V = hsv_values.val[2];
                 if(radius[largest_contour_index] > _radius_threshold){
                     Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
                     drawContours( drawing, contours_poly, largest_contour_index, color, 1, 8, vector<Vec4i>(), 0, Point() );
@@ -116,19 +116,23 @@ public:
                     circle( drawing, center[largest_contour_index],
                             (int)radius[largest_contour_index], color, 2, 8, 0 );
                     _object_center = center[largest_contour_index];
+
+                    circle(_im, _object_center, radius[largest_contour_index], Scalar(255, 0, 0), 5);
                     _valid_object = true;
-                    ROS_WARN_STREAM("contour number: " << largest_contour_index
+                    /*ROS_WARN_STREAM("contour number: " << largest_contour_index
                                     << " is with elegible radius: " << radius[largest_contour_index]);
                     ROS_WARN_STREAM( " HUE is: " << H);
                     ROS_WARN_STREAM( " SATURATION is: " << S);
                     ROS_WARN_STREAM( " VALUE is: " << V);
-                    ROS_INFO("******************************");
+                    ROS_INFO("******************************");*/
                 }
                 else
                     _valid_object = false;
             }
             /// Show in a window
             ///
+            cv::namedWindow("Original image", cv::WINDOW_AUTOSIZE);
+            cv::imshow("Original image", _im);
             cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
             cv::imshow("Mask image", _im_tennis_ball_hue);
             namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
@@ -142,26 +146,38 @@ public:
         }
     }
 
-
-
-    void record_ball_trajectory(double p_x, double p_y, double p_z){
+    void record_ball_trajectory(double p_x, double p_y, double p_z, double time_stamp){
         _output_file << p_x << ","
                      << p_y << ","
-                     << p_z << "\n";
+                     << p_z << ","
+                     << time_stamp << "\n";
     }
 
     void depth_processing_cb(const sensor_msgs::ImageConstPtr& depth_msg){
         if(_record && _valid_object && !_im.empty() && !depth_msg->data.empty()){
+            /*cv::Mat depth = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1)->image;*/
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
 
             pcl::fromROSMsg(ptcl_msg, *input_cloud);
             if(!input_cloud->empty()){
+                /*double z = *depth.col(std::round(_object_center.x)).row(std::round(_object_center.y)).data;*/
+
                 pcl::PointXYZRGBA pt = input_cloud->at(std::round(_object_center.x) +
                                                        std::round(_object_center.y) * input_cloud->width);
-                if(pt.x == pt.x && pt.y == pt.y && pt.z == pt.z)
-                    record_ball_trajectory(pt.x, pt.y, pt.z);
+                /*if(z == z){
+                    ROS_INFO_STREAM("the amazing z : " << z);
+                    record_ball_trajectory(_object_center.x, _object_center.y, z,
+                                           depth_msg->header.stamp.toSec() - _starting_time);
+                }*/
+                if(pt.x == pt.x && pt.y == pt.y && pt.z == pt.z){
+                    ROS_INFO_STREAM("the amazing z : " << pt.z <<
+                                    " the outstandin x : " << pt.x <<
+                                    " the mother y : " << pt.y);
+                    record_ball_trajectory(pt.x, pt.y, pt.z,
+                                           depth_msg->header.stamp.toSec() - _starting_time);
+                }
             }
         }
 
@@ -182,6 +198,7 @@ public:
             _trajectory_index = index->data;
             //_output_file.close();
             _output_file.open("ball_trajectory_no_" + std::to_string(_trajectory_index) + ".csv");
+            _starting_time = ros::Time::now().toSec();
         }
     }
 private:
@@ -199,7 +216,7 @@ private:
 
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
     std::ofstream _output_file;
-    double _lower_1, _lower_2, _lower_3, _upper_1, _upper_2, _upper_3, _largest_area = 0;
+    double _lower_1, _lower_2, _lower_3, _upper_1, _upper_2, _upper_3, _largest_area = 0, _starting_time = 0;
     float _radius_threshold;
     int _largest_contour_index, _trajectory_index;
     bool _record, _valid_object;
