@@ -63,10 +63,13 @@ public:
         transform_record_all_trajectories();
     }
 
-    void record_ball_trajectory(double p_x, double p_y, double p_z){
+    void record_ball_trajectory(double p_x, double p_y, double p_z,
+                                double time_stamp, double gripper_status){
         _output_file << p_x << ","
                      << p_y << ","
-                     << p_z << "\n";
+                     << p_z << ","
+                     << time_stamp << ","
+                     << gripper_status << "\n";
     }
 
     //Convert object position from camera frame to robot frame
@@ -95,10 +98,10 @@ public:
         camera_point.header.stamp = ros::Time();
 
         //just an arbitrary point in space
-        ROS_INFO_STREAM("trying to transform the point:");
-        ROS_INFO_STREAM("for x: " << object_pose_in_camera_frame[0]);
-        ROS_INFO_STREAM("for y: " << object_pose_in_camera_frame[1]);
-        ROS_INFO_STREAM("for z: " << object_pose_in_camera_frame[2]);
+//        ROS_INFO_STREAM("trying to transform the point:");
+//        ROS_INFO_STREAM("for x: " << object_pose_in_camera_frame[0]);
+//        ROS_INFO_STREAM("for y: " << object_pose_in_camera_frame[1]);
+//        ROS_INFO_STREAM("for z: " << object_pose_in_camera_frame[2]);
 
         camera_point.point.x = object_pose_in_camera_frame[0];
         camera_point.point.y = object_pose_in_camera_frame[1];
@@ -145,7 +148,7 @@ public:
             tf_base_conversion(input[i], output[i]);
         for(size_t i = 0; i < output.size(); i++)
             //if(output[i][0] < 2.2)
-                record_ball_trajectory(output[i][0], output[i][1], output[i][2]);
+                record_ball_trajectory(output[i][0], output[i][1], output[i][2], input[i][3], input[i][4]);
     }
 
     void construct_vector_from_file(std::ifstream& text_file){
