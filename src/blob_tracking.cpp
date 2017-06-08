@@ -24,6 +24,8 @@
 #include <tf/tf.h>
 #include <tf/transform_listener.h>
 
+#include <std_msgs/Float64MultiArray.h>
+
 using namespace cv;
 
 class Blob_detector{
@@ -49,6 +51,10 @@ public:
                 ("/robot/end_effector/right_gripper/state", 1, &Blob_detector::gripper_status, this);
 
         _next_trajectory_execution_pub = _nh.advertise<std_msgs::Bool>("/execute_next_trajectory", 1);
+        _ball_trajectory_pub = _nh.advertise<std_msgs::Float64MultiArray>("/ball_trajectory", 1);
+        _basket_position_pub = _nh.advertise<std_msgs::Float64MultiArray>("/basket_position", 1);
+        _gripping_pub = _nh.advertise<std_msgs::Float64MultiArray>("/gripping_status", 1);
+        _time_stamp_pub = _nh.advertise<std_msgs::Float64MultiArray>("/trajectory_time_stamps", 1);
 
         _camera_char.readFromXMLFile("/home/mukhtar/git/blob_tracking/data/camera_param_baxter.xml");
 
@@ -61,6 +67,16 @@ public:
         _upper_3 = std::stod(_parameters["upper_3"]);
         _radius_threshold = std::stod(_parameters["radius"]);
         _first_successful_iteration = false;
+
+        /*_ball_trajectory.layout.dim.push_back(std_msgs::MultiArrayDimension());
+        _basket_position.layout.dim.push_back(std_msgs::MultiArrayDimension());
+        _gripping_vector.layout.dim.push_back(std_msgs::MultiArrayDimension());
+        _time_stamp_trajectory.layout.dim.push_back(std_msgs::MultiArrayDimension());
+
+        _ball_trajectory.layout.dim[1].size = 3;
+        _basket_position.layout.dim[1].size = 3;
+        _gripping_vector.layout.dim[1].size = 1;
+        _time_stamp_trajectory.layout.dim[1].size = 1;*/
     }
 
     void trajectory_finished_cb(const std_msgs::Bool::ConstPtr& trajectory_finished){
@@ -125,9 +141,9 @@ public:
                         _ball_in_robot_frame[i][2],
                         _time_stamp_vector[i],
                         _gripper_status_vector[i],
-                        _basket_in_robot_frame[0] ,
-                        _basket_in_robot_frame[1],
-                        _basket_in_robot_frame[2]);
+                        _basket_in_robot_frame[i][0] ,
+                        _basket_in_robot_frame[i][1],
+                        _basket_in_robot_frame[i][2]);
     }
     //manipulate image to recognize the marker and draw a circle around the middle of the marker
     void config_and_detect_markers(){
@@ -270,13 +286,14 @@ public:
         }
     }
 
+
     void record_ball_trajectory(double p_x, double p_y, double p_z,
-                                double time_stamp, double basket_x, double basket_y, double basket_z){
+                                double time_stamp, bool gripper_status, double basket_x, double basket_y, double basket_z){
         _output_file << p_x << ","
                      << p_y << ","
                      << p_z << ","
                      << time_stamp << ","
-                     << _gripper_status << ","
+                     << gripper_status << ","
                      << basket_x << ","
                      << basket_y << ","
                      << basket_z << "\n";
@@ -286,7 +303,35 @@ public:
         _record = record->data;
         if(!record->data && _trajectory_finished){
             transfrom_record_all_points();
-            _execute_next_trajectory.data = true;
+            /*_ball_trajectory.layout.dim[0].size = _ball_in_robot_frame.size();
+            _basket_position.layout.dim[0].size = _basket_in_robot_frame.size();
+            _gripping_vector.layout.dim[0].size = _gripper_status_vector.size();
+            _time_stamp_trajectory.layout.dim[0].size = _time_stamp_vector.size();*/
+
+            for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
+                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
+                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
+                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][2]);
+            }
+
+            for(size_t i = 0; i < _basket_in_robot_frame.size(); i++){
+                _basket_position.data.push_back(_basket_in_robot_frame[i][0]);
+                _basket_position.data.push_back(_basket_in_robot_frame[i][1]);
+                _basket_position.data.push_back(_basket_in_robot_frame[i][2]);
+            }
+
+            for(size_t i = 0; i < _gripper_status_vector.size(); i++){
+                _gripping_vector.data.push_back(_gripper_status_vector[i]);
+            }
+
+            for(size_t i = 0; i < _time_stamp_vector.size(); i++){
+                _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
+            }
+
+            _ball_trajectory_pub.publish(_ball_trajectory);
+            _basket_position_pub.publish(_basket_position);
+            _gripping_pub.publish(_gripping_vector);
+            _time_stamp_pub.publish(_time_stamp_trajectory);
 
             _gripper_status_vector.clear();
             _time_stamp_vector.clear();
@@ -295,6 +340,10 @@ public:
             _basket_in_camera_frame.clear();
             _basket_in_robot_frame.clear();
             _output_file.close();
+
+            _execute_next_trajectory.data = true;
+            _next_trajectory_execution_pub.publish(_execute_next_trajectory);
+
         }
     }
 
@@ -316,7 +365,7 @@ private:
     rgbd_utils::RGBD_Subscriber::Ptr _images_sub;
     XmlRpc::XmlRpcValue _parameters;
     image_transport::Subscriber _rgb_image_sub, _depth_image_sub;
-    ros::Publisher _next_trajectory_execution_pub;
+    ros::Publisher _next_trajectory_execution_pub, _ball_trajectory_pub, _basket_position_pub, _gripping_pub, _time_stamp_pub;
     ros::Subscriber _start_recording_sub, _trajectory_index_sub, _gripper_release_sub, _trajectory_finished_sub;
     sensor_msgs::ImageConstPtr _rgb_msg, _depth_msg;
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
@@ -326,6 +375,7 @@ private:
     Eigen::Vector2i _marker_center;
 
     std_msgs::Bool _execute_next_trajectory;
+    std_msgs::Float64MultiArray _ball_trajectory, _basket_position, _gripping_vector, _time_stamp_trajectory;
     cv_bridge::CvImagePtr _cv_ptr;
     Mat _im, _im_hsv, _im_tennis_ball_hue;
     int _thresh = 100;
