@@ -25,18 +25,17 @@ using namespace cv;
 
 class Blob_detector{
 public:
-    Blob_detector(){
-        init();
-    }
+
 
     void init(){
         image_transport::ImageTransport it_(_nh);
-        _rgb_image_sub = it_.subscribe("/camera/rgb/image_raw", 1, &Blob_detector::blob_detect_and_publish_cb, this);
-        _depth_image_sub = it_.subscribe("/camera/depth/image_raw", 1, &Blob_detector::depth_processing_cb, this);
-        _camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/camera/rgb/camera_info", 1, &Blob_detector::camera_info_cb, this);
-        _start_recording_sub = _nh.subscribe<std_msgs::Bool>("/record_ball_trajectory", 1, &Blob_detector::start_recording_cb, this);
-        _trajectory_index_sub = _nh.subscribe<std_msgs::Int64>("/trajectory_index", 1, &Blob_detector::trajectory_index_cb, this);
+        _rgb_image_sub = it_.subscribe("/kinect2/qhd/image_color", 1, &Blob_detector::blob_detect_and_publish_cb, this);
+        _depth_image_sub = it_.subscribe("/kinect2/qhd/image_depth_rect", 1, &Blob_detector::depth_processing_cb, this);
+        _camera_info_sub = _nh.subscribe<sensor_msgs::CameraInfoConstPtr>("/kinect2/qhd/camera_info", 1, &Blob_detector::camera_info_cb, this);
+        //_start_recording_sub = _nh.subscribe<std_msgs::Bool>("/record_ball_trajectory", 1, &Blob_detector::start_recording_cb, this);
+        //_trajectory_index_sub = _nh.subscribe<std_msgs::Int64>("/trajectory_index", 1, &Blob_detector::trajectory_index_cb, this);
 
+        _output_file.open("ball_trajectory_no_.csv");
         _nh.getParam("/", _parameters);
         _lower_1 = std::stod(_parameters["lower_1"]);
         _lower_2 = std::stod(_parameters["lower_2"]);
@@ -47,6 +46,7 @@ public:
         _radius_threshold = std::stod(_parameters["radius"]);
         ros::AsyncSpinner my_spinner(1);
         my_spinner.start();
+        //ros::spin();
     }
 
     void blob_detect_and_publish_cb(const sensor_msgs::ImageConstPtr& msg){
@@ -55,7 +55,7 @@ public:
         Mat threshold_output;
         vector<vector<Point> > contours;
         vector<Vec4i> hierarchy;
-        int thresh = 100;
+        int thresh = 180;
         RNG rng(12345);
         try
         {
@@ -92,11 +92,12 @@ public:
             }
 
             Mat drawing = Mat::zeros( threshold_output.size(), CV_8UC3 );
-            if(contours.size() > 0){
+            if(contours.size() > 0 && largest_contour_index < contours.size()){
+                //ROS_WARN_STREAM("contours are: " << contours.size() << " and largest one is: " << largest_contour_index);
                 approxPolyDP( Mat(contours[largest_contour_index]),
                               contours_poly[largest_contour_index],
                               3,
-                              true );
+                              false );
                 boundRect[largest_contour_index] = boundingRect( Mat(contours_poly[largest_contour_index]) );
                 minEnclosingCircle( (Mat)contours_poly[largest_contour_index],
                                     center[largest_contour_index],
@@ -107,6 +108,9 @@ public:
                 int H = hsv_values.val[0];
                 int S = hsv_values.val[1];
                 int V = hsv_values.val[2];
+
+                //RegionOfInterest
+
                 if(radius[largest_contour_index] > _radius_threshold){
                     Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
                     drawContours( drawing, contours_poly, largest_contour_index, color, 1, 8, vector<Vec4i>(), 0, Point() );
@@ -116,6 +120,7 @@ public:
                     circle( drawing, center[largest_contour_index],
                             (int)radius[largest_contour_index], color, 2, 8, 0 );
                     _object_center = center[largest_contour_index];
+                    circle(_im, _object_center, radius[largest_contour_index], Scalar(255, 0, 0), 5);
                     _valid_object = true;
                     ROS_WARN_STREAM("contour number: " << largest_contour_index
                                     << " is with elegible radius: " << radius[largest_contour_index]);
@@ -129,10 +134,12 @@ public:
             }
             /// Show in a window
             ///
-            cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
-            cv::imshow("Mask image", _im_tennis_ball_hue);
-            namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
-            imshow( "Contours", drawing );
+            namedWindow("Original image", cv::WINDOW_AUTOSIZE);
+            imshow("Original image", _im);
+            namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
+            imshow("Mask image", _im_tennis_ball_hue);
+            //namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
+            //imshow( "Contours", drawing );
             waitKey(1);
         }
         catch (...)
@@ -151,7 +158,7 @@ public:
     }
 
     void depth_processing_cb(const sensor_msgs::ImageConstPtr& depth_msg){
-        if(_record && _valid_object && !_im.empty() && !depth_msg->data.empty()){
+        if(!_im.empty() && !depth_msg->data.empty()){
             rgbd_utils::RGBD_to_Pointcloud converter(depth_msg, _rgb_msg, _camera_info_msg);
             sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
@@ -184,6 +191,8 @@ public:
             _output_file.open("ball_trajectory_no_" + std::to_string(_trajectory_index) + ".csv");
         }
     }
+
+    Blob_detector();
 private:
     ros::NodeHandle _nh;
     XmlRpc::XmlRpcValue _parameters;
@@ -210,6 +219,9 @@ int main(int argc, char **argv){
     ros::NodeHandle n;
 
     Blob_detector my_detector;
-    ros::spin();
-    ros::waitForShutdown();
+    while(ros::ok()){
+        ROS_WARN("press Enter for next recording");
+        std::cin.ignore();
+        my_detector.init();
+    }
 }
