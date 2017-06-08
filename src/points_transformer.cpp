@@ -64,12 +64,16 @@ public:
     }
 
     void record_ball_trajectory(double p_x, double p_y, double p_z,
-                                double time_stamp, double gripper_status){
+                                double time_stamp, double gripper_status,
+                                double basket_x, double basket_y, double basket_z){
         _output_file << p_x << ","
                      << p_y << ","
                      << p_z << ","
                      << time_stamp << ","
-                     << gripper_status << "\n";
+                     << gripper_status << ","
+                     << basket_x << ","
+                     << basket_y << ","
+                     << basket_z << "\n";
     }
 
     //Convert object position from camera frame to robot frame
@@ -142,13 +146,20 @@ public:
     }
 
     void transfrom_record_all_points(data_t& input, data_t& output){
+        std::vector<double> basket_position_camera_frame, basket_position_robot_frame;
         if(output.empty())
             output.resize(input.size());
-        for(size_t i = 0; i < input.size(); i++)
+        for(size_t i = 0; i < input.size(); i++){
+            basket_position_camera_frame.push_back(input[i][5]);
+            basket_position_camera_frame.push_back(input[i][6]);
+            basket_position_camera_frame.push_back(input[i][7]);
             tf_base_conversion(input[i], output[i]);
+            tf_base_conversion(basket_position_camera_frame, basket_position_robot_frame);
+        }
         for(size_t i = 0; i < output.size(); i++)
             //if(output[i][0] < 2.2)
-                record_ball_trajectory(output[i][0], output[i][1], output[i][2], input[i][3], input[i][4]);
+                record_ball_trajectory(output[i][0], output[i][1], output[i][2], input[i][3], input[i][4],
+                        basket_position_robot_frame[0] , basket_position_robot_frame[1], basket_position_robot_frame[2]);
     }
 
     void construct_vector_from_file(std::ifstream& text_file){

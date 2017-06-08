@@ -41,10 +41,14 @@ public:
 
         _start_recording_sub = _nh.subscribe<std_msgs::Bool>("/record_ball_trajectory", 1,
                                                              &Blob_detector::start_recording_cb, this);
+        _trajectory_finished_sub = _nh.subscribe<std_msgs::Bool>("/trajectory_finished", 1,
+                                                                 &Blob_detector::trajectory_finished_cb, this);
         _trajectory_index_sub = _nh.subscribe<std_msgs::Int64>("/trajectory_index", 1,
                                                                &Blob_detector::trajectory_index_cb, this);
         _gripper_release_sub = _nh.subscribe<baxter_core_msgs::EndEffectorState>
                 ("/robot/end_effector/right_gripper/state", 1, &Blob_detector::gripper_status, this);
+
+        _next_trajectory_execution_pub = _nh.advertise<std_msgs::Bool>("/execute_next_trajectory", 1);
 
         _camera_char.readFromXMLFile("/home/mukhtar/git/blob_tracking/data/camera_param_baxter.xml");
 
@@ -59,6 +63,72 @@ public:
         _first_successful_iteration = false;
     }
 
+    void trajectory_finished_cb(const std_msgs::Bool::ConstPtr& trajectory_finished){
+        _trajectory_finished = trajectory_finished->data;
+    }
+
+    //Convert object position from camera frame to robot frame
+    void tf_base_conversion(std::vector<double>& object_pose_in_camera_frame,
+                            std::vector<double>& object_pose_in_robot_frame){
+        tf::TransformListener listener;
+        tf::StampedTransform stamped_transform;
+        std::string child_frame = "/camera_depth_optical_frame";
+        //std::string child_frame = "/camera_rgb_optical_frame";
+        std::string parent_frame = "/world";
+        //std::string parent_frame = "/camera_link";
+        try{
+            listener.lookupTransform(child_frame, parent_frame,
+                                     ros::Time::now(), stamped_transform);
+        }
+        catch (tf::TransformException &ex) {
+            ROS_ERROR("%s",ex.what());
+            ros::Duration(1.0).sleep();
+        }
+
+        geometry_msgs::PointStamped camera_point;
+        geometry_msgs::PointStamped base_point;
+        camera_point.header.frame_id = child_frame;
+
+        //we'll just use the most recent transform available for our simple example
+        camera_point.header.stamp = ros::Time();
+
+        camera_point.point.x = object_pose_in_camera_frame[0];
+        camera_point.point.y = object_pose_in_camera_frame[1];
+        camera_point.point.z = object_pose_in_camera_frame[2];
+
+        try{
+            listener.transformPoint(parent_frame, camera_point, base_point);
+            ROS_INFO("camera_depth_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
+                     camera_point.point.x, camera_point.point.y, camera_point.point.z,
+                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
+        }
+        catch(tf::TransformException& ex){
+            ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
+        }
+        object_pose_in_robot_frame.push_back(base_point.point.x);
+        object_pose_in_robot_frame.push_back(base_point.point.y);
+        object_pose_in_robot_frame.push_back(base_point.point.z);
+    }
+
+    void transfrom_record_all_points(){
+        _ball_in_robot_frame.resize(_ball_in_camera_frame.size());
+        _basket_in_robot_frame.resize(_basket_in_camera_frame.size());
+        for(size_t i = 0; i < _ball_in_camera_frame.size(); i++){
+            tf_base_conversion(_ball_in_camera_frame[i], _ball_in_robot_frame[i]);
+            tf_base_conversion(_basket_in_camera_frame[i], _basket_in_robot_frame[i]);
+        }
+
+        for(size_t i = 0; i < _ball_in_robot_frame.size(); i++)
+            //if(output[i][0] < 2.2)
+                record_ball_trajectory(_ball_in_robot_frame[i][0],
+                        _ball_in_robot_frame[i][1],
+                        _ball_in_robot_frame[i][2],
+                        _time_stamp_vector[i],
+                        _gripper_status_vector[i],
+                        _basket_in_robot_frame[0] ,
+                        _basket_in_robot_frame[1],
+                        _basket_in_robot_frame[2]);
+    }
     //manipulate image to recognize the marker and draw a circle around the middle of the marker
     void config_and_detect_markers(){
         _aruco_detector.setDictionary("ARUCO");
@@ -157,18 +227,24 @@ public:
 
                         pcl::fromROSMsg(ptcl_msg, *input_cloud);
                         if(!input_cloud->empty()){
-                            pcl::PointXYZRGBA pt = input_cloud->at(std::round(_object_center.x) +
+                            pcl::PointXYZRGBA pt_ball = input_cloud->at(std::round(_object_center.x) +
                                                                    std::round(_object_center.y) * input_cloud->width);
                             pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center(0)) +
                                                                    std::round(_marker_center(1)) * input_cloud->width);
-                            if(pt.x == pt.x && pt.y == pt.y && pt.z == pt.z &&
-                                    pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z){
+                            if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z &&
+                                    pt_basket.x == pt_basket.x &&
+                                    pt_basket.y == pt_basket.y &&
+                                    pt_basket.z == pt_basket.z){
 //                                ROS_INFO_STREAM("the amazing z : " << pt.z <<
 //                                                " the outstandin x : " << pt.x <<
 //                                                " the mother y : " << pt.y);
-                                record_ball_trajectory(pt.x, pt.y, pt.z,
+                                _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
+                                _basket_in_camera_frame.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
+                                _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
+                                _gripper_status_vector.push_back(_gripper_status);
+                                /*record_ball_trajectory(pt.x, pt.y, pt.z,
                                                        _depth_msg->header.stamp.toSec() - _starting_time,
-                                                       pt_basket.x, pt_basket.y, pt_basket.z);
+                                                       pt_basket.x, pt_basket.y, pt_basket.z);*/
                             }
                         }
                     }
@@ -208,15 +284,25 @@ public:
 
     void start_recording_cb(const std_msgs::Bool::ConstPtr& record){
         _record = record->data;
-        if(!record->data)
+        if(!record->data && _trajectory_finished){
+            transfrom_record_all_points();
+            _execute_next_trajectory.data = true;
+
+            _gripper_status_vector.clear();
+            _time_stamp_vector.clear();
+            _ball_in_camera_frame.clear();
+            _ball_in_robot_frame.clear();
+            _basket_in_camera_frame.clear();
+            _basket_in_robot_frame.clear();
             _output_file.close();
+        }
     }
 
     void trajectory_index_cb(const std_msgs::Int64::ConstPtr& index){
         if(_record){
             _trajectory_index = index->data;
             //_output_file.close();
-            _output_file.open("ball_trajectory_no_" + std::to_string(_trajectory_index) + ".csv");
+            _output_file.open("ball_trajectory_robot_frame_" + std::to_string(_trajectory_index) + ".csv");
             _starting_time = ros::Time::now().toSec();
         }
     }
@@ -230,7 +316,8 @@ private:
     rgbd_utils::RGBD_Subscriber::Ptr _images_sub;
     XmlRpc::XmlRpcValue _parameters;
     image_transport::Subscriber _rgb_image_sub, _depth_image_sub;
-    ros::Subscriber _start_recording_sub, _trajectory_index_sub, _gripper_release_sub;
+    ros::Publisher _next_trajectory_execution_pub;
+    ros::Subscriber _start_recording_sub, _trajectory_index_sub, _gripper_release_sub, _trajectory_finished_sub;
     sensor_msgs::ImageConstPtr _rgb_msg, _depth_msg;
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
     aruco::MarkerDetector _aruco_detector;
@@ -238,16 +325,25 @@ private:
     aruco::CameraParameters _camera_char;
     Eigen::Vector2i _marker_center;
 
+    std_msgs::Bool _execute_next_trajectory;
     cv_bridge::CvImagePtr _cv_ptr;
     Mat _im, _im_hsv, _im_tennis_ball_hue;
     int _thresh = 100;
     Point2f _object_center;
 
     std::ofstream _output_file;
-    double _lower_1, _lower_2, _lower_3, _upper_1, _upper_2, _upper_3, _largest_area = 0, _starting_time = 0;
+
+    std::vector<std::vector<double>> _ball_in_camera_frame, _basket_in_camera_frame,
+    _ball_in_robot_frame, _basket_in_robot_frame;
+
+    std::vector<double> _time_stamp_vector;
+    std::vector<bool>_gripper_status_vector;
+
+    double _lower_1, _lower_2, _lower_3, _upper_1,
+    _upper_2, _upper_3, _largest_area = 0, _starting_time = 0;
     float _radius_threshold, _marker_size = 0.1;
     int _largest_contour_index, _trajectory_index;
-    bool _record, _valid_object, _gripper_status, _first_successful_iteration;
+    bool _record, _valid_object, _gripper_status, _first_successful_iteration, _trajectory_finished;
 };
 
 int main(int argc, char **argv){
