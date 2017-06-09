@@ -67,32 +67,24 @@ public:
         _upper_3 = std::stod(_parameters["upper_3"]);
         _radius_threshold = std::stod(_parameters["radius"]);
         _first_successful_iteration = false;
-
-        /*_ball_trajectory.layout.dim.push_back(std_msgs::MultiArrayDimension());
-        _basket_position.layout.dim.push_back(std_msgs::MultiArrayDimension());
-        _gripping_vector.layout.dim.push_back(std_msgs::MultiArrayDimension());
-        _time_stamp_trajectory.layout.dim.push_back(std_msgs::MultiArrayDimension());
-
-        _ball_trajectory.layout.dim[1].size = 3;
-        _basket_position.layout.dim[1].size = 3;
-        _gripping_vector.layout.dim[1].size = 1;
-        _time_stamp_trajectory.layout.dim[1].size = 1;*/
     }
 
     void trajectory_finished_cb(const std_msgs::Bool::ConstPtr& trajectory_finished){
         _trajectory_finished = trajectory_finished->data;
-
     }
 
     //Convert object position from camera frame to robot frame
     void tf_base_conversion(std::vector<double>& object_pose_in_camera_frame,
                             std::vector<double>& object_pose_in_robot_frame){
+        if(object_pose_in_camera_frame.empty()){
+            ROS_ERROR("THE TRANSFORMATION IS IMPOSSIBLE, EMPTY VECTOR");
+            return;
+        }
+        ROS_INFO("Converting point into robot frame ...");
         tf::TransformListener listener;
         tf::StampedTransform stamped_transform;
         std::string child_frame = "/camera_depth_optical_frame";
-        //std::string child_frame = "/camera_rgb_optical_frame";
         std::string parent_frame = "/world";
-        //std::string parent_frame = "/camera_link";
         try{
             listener.lookupTransform(child_frame, parent_frame,
                                      ros::Time::now(), stamped_transform);
@@ -115,12 +107,12 @@ public:
 
         try{
             listener.transformPoint(parent_frame, camera_point, base_point);
-            ROS_INFO("camera_depth_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
+            /*ROS_INFO("camera_depth_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
                      camera_point.point.x, camera_point.point.y, camera_point.point.z,
-                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
+                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());*/
         }
         catch(tf::TransformException& ex){
-            ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
+            /*ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());*/
         }
         object_pose_in_robot_frame.push_back(base_point.point.x);
         object_pose_in_robot_frame.push_back(base_point.point.y);
@@ -128,24 +120,52 @@ public:
     }
 
     void transfrom_record_all_points(){
+        if(_ball_in_camera_frame.empty()){
+            ROS_ERROR("NO DATA RECORDED, FAILED ITERATION !!!");
+            return;
+        }
         _ball_in_robot_frame.resize(_ball_in_camera_frame.size());
         _basket_in_robot_frame.resize(_basket_in_camera_frame.size());
         for(size_t i = 0; i < _ball_in_camera_frame.size(); i++){
             tf_base_conversion(_ball_in_camera_frame[i], _ball_in_robot_frame[i]);
-            tf_base_conversion(_basket_in_camera_frame[i], _basket_in_robot_frame[i]);
         }
+        _basket_in_camera_frame_average = get_average_vector_vector(_basket_in_camera_frame);
+        tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);
 
         for(size_t i = 0; i < _ball_in_robot_frame.size(); i++)
-            //if(output[i][0] < 2.2)
-                record_ball_trajectory(_ball_in_robot_frame[i][0],
-                        _ball_in_robot_frame[i][1],
-                        _ball_in_robot_frame[i][2],
-                        _time_stamp_vector[i],
-                        _gripper_status_vector[i],
-                        _basket_in_robot_frame[i][0] ,
-                        _basket_in_robot_frame[i][1],
-                        _basket_in_robot_frame[i][2]);
+            record_ball_trajectory(_ball_in_robot_frame[i][0],
+                    _ball_in_robot_frame[i][1],
+                    _ball_in_robot_frame[i][2],
+                    _time_stamp_vector[i],
+                    _gripper_status_vector[i],
+                    _basket_in_robot_frame_average[0] ,
+                    _basket_in_robot_frame_average[1],
+                    _basket_in_robot_frame_average[2]);
     }
+
+    //this function will return the average of each column in the vector of vectors
+    std::vector<double> get_average_vector_vector(std::vector< std::vector<double> > vector_vector){
+        std::vector<double> averages;
+        if(vector_vector.empty()){
+            ROS_ERROR_STREAM("The vector is empty!!!!!!");
+            return averages;
+        }
+        else{
+
+            averages = std::vector<double>(vector_vector[0].size(), 0);
+        }
+        for(size_t i = 0; i < vector_vector.size(); i++){
+            for(size_t j = 0; j < averages.size(); j++){
+                averages[j] = averages[j] + vector_vector[i][j];
+            }
+        }
+
+        for(size_t j = 0; j < averages.size(); j++){
+            averages[j] = averages[j] / vector_vector.size();
+        }
+        return averages;
+    }
+
     //manipulate image to recognize the marker and draw a circle around the middle of the marker
     void config_and_detect_markers(){
         _aruco_detector.setDictionary("ARUCO");
@@ -153,59 +173,61 @@ public:
 
         if (!_markers.empty()){
             //ROS_WARN_STREAM("marker size is: " << _markers.size());
-            _markers[0].draw(_im, cv::Scalar(94.0, 206.0, 165.0, 0.0));
-            _markers[0].calculateExtrinsics(_marker_size, _camera_char, false);
+            _marker_center.resize(_markers.size());
+            for(size_t i = 0; i < _markers.size(); i++){
+                _markers[i].draw(_im, cv::Scalar(94.0, 206.0, 165.0, 0.0));
+                _markers[i].calculateExtrinsics(_marker_size, _camera_char, false);
 
-            _marker_center << (int) (_markers[0][0].x + _markers[0][2].x)/2,
-                    (int) (_markers[0][0].y + _markers[0][2].y)/2;
+                _marker_center[i] << (int) (_markers[i][0].x + _markers[i][2].x)/2,
+                        (int) (_markers[i][0].y + _markers[i][2].y)/2;
 
-            circle(_im, cv::Point((_markers[0][0].x + _markers[0][2].x)/2,
-                    (_markers[0][0].y + _markers[0][2].y)/2), 10, CV_RGB(255,0,0));
+                circle(_im, cv::Point((_markers[i][0].x + _markers[i][2].x)/2,
+                        (_markers[i][0].y + _markers[i][2].y)/2), 10, CV_RGB(255,0,0));
+            }
         }
     }
 
     void transform_and_reinitialize(){
-            transfrom_record_all_points();
-            /*_ball_trajectory.layout.dim[0].size = _ball_in_robot_frame.size();
-            _basket_position.layout.dim[0].size = _basket_in_robot_frame.size();
-            _gripping_vector.layout.dim[0].size = _gripper_status_vector.size();
-            _time_stamp_trajectory.layout.dim[0].size = _time_stamp_vector.size();*/
+        transfrom_record_all_points();
 
-            for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
-                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
-                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
-                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][2]);
-            }
+        for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
+            _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
+            _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
+            _ball_trajectory.data.push_back(_ball_in_robot_frame[i][2]);
+        }
 
-            for(size_t i = 0; i < _basket_in_robot_frame.size(); i++){
-                _basket_position.data.push_back(_basket_in_robot_frame[i][0]);
-                _basket_position.data.push_back(_basket_in_robot_frame[i][1]);
-                _basket_position.data.push_back(_basket_in_robot_frame[i][2]);
-            }
+        for(size_t i = 0; i < _basket_in_robot_frame_average.size(); i++){
+            _basket_position.data.push_back(_basket_in_robot_frame_average[i]);
+        }
 
-            for(size_t i = 0; i < _gripper_status_vector.size(); i++){
-                _gripping_vector.data.push_back(_gripper_status_vector[i]);
-            }
+        for(size_t i = 0; i < _gripper_status_vector.size(); i++){
+            _gripping_vector.data.push_back(_gripper_status_vector[i]);
+        }
 
-            for(size_t i = 0; i < _time_stamp_vector.size(); i++){
-                _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
-            }
+        for(size_t i = 0; i < _time_stamp_vector.size(); i++){
+            _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
+        }
 
-            _ball_trajectory_pub.publish(_ball_trajectory);
-            _basket_position_pub.publish(_basket_position);
-            _gripping_pub.publish(_gripping_vector);
-            _time_stamp_pub.publish(_time_stamp_trajectory);
+        _ball_trajectory_pub.publish(_ball_trajectory);
+        _basket_position_pub.publish(_basket_position);
+        _gripping_pub.publish(_gripping_vector);
+        _time_stamp_pub.publish(_time_stamp_trajectory);
 
-            _gripper_status_vector.clear();
-            _time_stamp_vector.clear();
-            _ball_in_camera_frame.clear();
-            _ball_in_robot_frame.clear();
-            _basket_in_camera_frame.clear();
-            _basket_in_robot_frame.clear();
-            _output_file.close();
+        _gripper_status_vector.clear();
+        _time_stamp_vector.clear();
+        _ball_in_camera_frame.clear();
+        _ball_in_robot_frame.clear();
+        _basket_in_camera_frame.clear();
+        _basket_in_robot_frame.clear();
+        _basket_in_robot_frame_average.clear();
+        _output_file.close();
+        _ball_trajectory.data.clear();
+        _basket_position.data.clear();
+        _gripping_vector.data.clear();
+        _time_stamp_trajectory.data.clear();
 
-            _execute_next_trajectory.data = true;
-            _next_trajectory_execution_pub.publish(_execute_next_trajectory);
+        _execute_next_trajectory.data = true;
+        _next_trajectory_execution_pub.publish(_execute_next_trajectory);
     }
 
     void update(){
@@ -289,28 +311,27 @@ public:
                         pcl::fromROSMsg(ptcl_msg, *input_cloud);
                         if(!input_cloud->empty()){
                             pcl::PointXYZRGBA pt_ball = input_cloud->at(std::round(_object_center.x) +
-                                                                   std::round(_object_center.y) * input_cloud->width);
-                            pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center(0)) +
-                                                                   std::round(_marker_center(1)) * input_cloud->width);
-                            if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z &&
-                                    pt_basket.x == pt_basket.x &&
-                                    pt_basket.y == pt_basket.y &&
-                                    pt_basket.z == pt_basket.z){
-//                                ROS_INFO_STREAM("the amazing z : " << pt.z <<
-//                                                " the outstandin x : " << pt.x <<
-//                                                " the mother y : " << pt.y);
+                                                                        std::round(_object_center.y) * input_cloud->width);
+
+                            std::vector<std::vector<double>> markers_positions;
+
+                            for(size_t i = 0; i < _marker_center.size(); i++){
+                                pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center[i](0)) + std::round(_marker_center[i](1)) * input_cloud->width);
+
+                                                                                         if(pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z)
+                                                                                         markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
+                            }
+
+                            if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z){
                                 _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
-                                _basket_in_camera_frame.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
-                                //
+                                if(!markers_positions.empty())
+                                    _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));
                                 if(_depth_msg->header.stamp.toSec() - _starting_time < 0)
                                     _time_stamp_vector.push_back(0);
                                 else
                                     _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
 
                                 _gripper_status_vector.push_back(_gripper_status);
-                                /*record_ball_trajectory(pt.x, pt.y, pt.z,
-                                                       _depth_msg->header.stamp.toSec() - _starting_time,
-                                                       pt_basket.x, pt_basket.y, pt_basket.z);*/
                             }
                         }
                     }
@@ -383,7 +404,7 @@ private:
     aruco::MarkerDetector _aruco_detector;
     std::vector<aruco::Marker> _markers;
     aruco::CameraParameters _camera_char;
-    Eigen::Vector2i _marker_center;
+    std::vector<Eigen::Vector2i> _marker_center;
 
     std_msgs::Bool _execute_next_trajectory;
     std_msgs::Float64MultiArray _ball_trajectory, _basket_position, _gripping_vector, _time_stamp_trajectory;
@@ -397,12 +418,12 @@ private:
     std::vector<std::vector<double>> _ball_in_camera_frame, _basket_in_camera_frame,
     _ball_in_robot_frame, _basket_in_robot_frame;
 
-    std::vector<double> _time_stamp_vector;
+    std::vector<double> _time_stamp_vector, _basket_in_camera_frame_average, _basket_in_robot_frame_average;
     std::vector<bool>_gripper_status_vector;
 
     double _lower_1, _lower_2, _lower_3, _upper_1,
     _upper_2, _upper_3, _largest_area = 0, _starting_time = 0;
-    float _radius_threshold, _marker_size = 0.1;
+    float _radius_threshold, _marker_size = 0.12;
     int _largest_contour_index, _trajectory_index;
     bool _record, _valid_object, _gripper_status, _first_successful_iteration, _trajectory_finished;
 };
@@ -412,7 +433,7 @@ int main(int argc, char **argv){
     ros::NodeHandle n;
 
     Blob_detector my_detector;
-//    usleep(10e6);
+    //    usleep(10e6);
     while(ros::ok()){
         my_detector.update();
         ros::spinOnce();

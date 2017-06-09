@@ -16,6 +16,8 @@ find_package(catkin REQUIRED COMPONENTS
   baxter_core_msgs
 )
 
+catkin_python_setup()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -fPIC")
 
 
@@ -42,6 +44,10 @@ catkin_package(
 include_directories(
   ${catkin_INCLUDE_DIRS}
 )
+
+install(PROGRAMS   scripts/ros_traj   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(PROGRAMS   scripts/balltraj   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(PROGRAMS   scripts/filternew_secondorder   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 add_executable(blob_tracking src/blob_tracking.cpp)
 target_link_libraries(blob_tracking /usr/local/lib/libaruco.so ${catkin_LIBRARIES} ${PCL_LIBRARIES} rgbd_utils )
