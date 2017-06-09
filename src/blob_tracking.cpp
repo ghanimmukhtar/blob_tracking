@@ -81,6 +81,7 @@ public:
 
     void trajectory_finished_cb(const std_msgs::Bool::ConstPtr& trajectory_finished){
         _trajectory_finished = trajectory_finished->data;
+
     }
 
     //Convert object position from camera frame to robot frame
@@ -151,7 +152,7 @@ public:
         _aruco_detector.detect(_im, _markers, _camera_char, _marker_size);
 
         if (!_markers.empty()){
-            ROS_WARN_STREAM("marker size is: " << _markers.size());
+            //ROS_WARN_STREAM("marker size is: " << _markers.size());
             _markers[0].draw(_im, cv::Scalar(94.0, 206.0, 165.0, 0.0));
             _markers[0].calculateExtrinsics(_marker_size, _camera_char, false);
 
@@ -161,6 +162,50 @@ public:
             circle(_im, cv::Point((_markers[0][0].x + _markers[0][2].x)/2,
                     (_markers[0][0].y + _markers[0][2].y)/2), 10, CV_RGB(255,0,0));
         }
+    }
+
+    void transform_and_reinitialize(){
+            transfrom_record_all_points();
+            /*_ball_trajectory.layout.dim[0].size = _ball_in_robot_frame.size();
+            _basket_position.layout.dim[0].size = _basket_in_robot_frame.size();
+            _gripping_vector.layout.dim[0].size = _gripper_status_vector.size();
+            _time_stamp_trajectory.layout.dim[0].size = _time_stamp_vector.size();*/
+
+            for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
+                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
+                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
+                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][2]);
+            }
+
+            for(size_t i = 0; i < _basket_in_robot_frame.size(); i++){
+                _basket_position.data.push_back(_basket_in_robot_frame[i][0]);
+                _basket_position.data.push_back(_basket_in_robot_frame[i][1]);
+                _basket_position.data.push_back(_basket_in_robot_frame[i][2]);
+            }
+
+            for(size_t i = 0; i < _gripper_status_vector.size(); i++){
+                _gripping_vector.data.push_back(_gripper_status_vector[i]);
+            }
+
+            for(size_t i = 0; i < _time_stamp_vector.size(); i++){
+                _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
+            }
+
+            _ball_trajectory_pub.publish(_ball_trajectory);
+            _basket_position_pub.publish(_basket_position);
+            _gripping_pub.publish(_gripping_vector);
+            _time_stamp_pub.publish(_time_stamp_trajectory);
+
+            _gripper_status_vector.clear();
+            _time_stamp_vector.clear();
+            _ball_in_camera_frame.clear();
+            _ball_in_robot_frame.clear();
+            _basket_in_camera_frame.clear();
+            _basket_in_robot_frame.clear();
+            _output_file.close();
+
+            _execute_next_trajectory.data = true;
+            _next_trajectory_execution_pub.publish(_execute_next_trajectory);
     }
 
     void update(){
@@ -256,7 +301,12 @@ public:
 //                                                " the mother y : " << pt.y);
                                 _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
                                 _basket_in_camera_frame.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
-                                _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
+                                //
+                                if(_depth_msg->header.stamp.toSec() - _starting_time < 0)
+                                    _time_stamp_vector.push_back(0);
+                                else
+                                    _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
+
                                 _gripper_status_vector.push_back(_gripper_status);
                                 /*record_ball_trajectory(pt.x, pt.y, pt.z,
                                                        _depth_msg->header.stamp.toSec() - _starting_time,
@@ -269,13 +319,17 @@ public:
                 else
                     _valid_object = false;
             }
+            if(!_record && _trajectory_finished){
+                transform_and_reinitialize();
+                _trajectory_finished = false;
+            }
             /// Show in a window
             cv::namedWindow("Original image", cv::WINDOW_AUTOSIZE);
             cv::imshow("Original image", _im);
-            cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
+            /*cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
             cv::imshow("Mask image", _im_tennis_ball_hue);
             namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
-            imshow( "Contours", drawing );
+            imshow( "Contours", drawing );*/
             waitKey(1);
         }
         catch (...)
@@ -301,50 +355,7 @@ public:
 
     void start_recording_cb(const std_msgs::Bool::ConstPtr& record){
         _record = record->data;
-        if(!record->data && _trajectory_finished){
-            transfrom_record_all_points();
-            /*_ball_trajectory.layout.dim[0].size = _ball_in_robot_frame.size();
-            _basket_position.layout.dim[0].size = _basket_in_robot_frame.size();
-            _gripping_vector.layout.dim[0].size = _gripper_status_vector.size();
-            _time_stamp_trajectory.layout.dim[0].size = _time_stamp_vector.size();*/
 
-            for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
-                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
-                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
-                _ball_trajectory.data.push_back(_ball_in_robot_frame[i][2]);
-            }
-
-            for(size_t i = 0; i < _basket_in_robot_frame.size(); i++){
-                _basket_position.data.push_back(_basket_in_robot_frame[i][0]);
-                _basket_position.data.push_back(_basket_in_robot_frame[i][1]);
-                _basket_position.data.push_back(_basket_in_robot_frame[i][2]);
-            }
-
-            for(size_t i = 0; i < _gripper_status_vector.size(); i++){
-                _gripping_vector.data.push_back(_gripper_status_vector[i]);
-            }
-
-            for(size_t i = 0; i < _time_stamp_vector.size(); i++){
-                _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
-            }
-
-            _ball_trajectory_pub.publish(_ball_trajectory);
-            _basket_position_pub.publish(_basket_position);
-            _gripping_pub.publish(_gripping_vector);
-            _time_stamp_pub.publish(_time_stamp_trajectory);
-
-            _gripper_status_vector.clear();
-            _time_stamp_vector.clear();
-            _ball_in_camera_frame.clear();
-            _ball_in_robot_frame.clear();
-            _basket_in_camera_frame.clear();
-            _basket_in_robot_frame.clear();
-            _output_file.close();
-
-            _execute_next_trajectory.data = true;
-            _next_trajectory_execution_pub.publish(_execute_next_trajectory);
-
-        }
     }
 
     void trajectory_index_cb(const std_msgs::Int64::ConstPtr& index){
