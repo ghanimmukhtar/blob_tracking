@@ -132,27 +132,31 @@ public:
     }
 
     void transfrom_record_all_points(){
+        ROS_WARN_STREAM("trying to transform and record, size of vector is: " << _ball_in_camera_frame.size());
         if(_ball_in_camera_frame.empty()){
             ROS_ERROR("NO DATA RECORDED, FAILED ITERATION !!!");
             return;
         }
-        _ball_in_robot_frame.resize(_ball_in_camera_frame.size());
+        /*_ball_in_robot_frame.resize(_ball_in_camera_frame.size());
         _basket_in_robot_frame.resize(_basket_in_camera_frame.size());
         for(size_t i = 0; i < _ball_in_camera_frame.size(); i++){
             tf_base_conversion(_ball_in_camera_frame[i], _ball_in_robot_frame[i]);
         }
         _basket_in_camera_frame_average = get_average_vector_vector(_basket_in_camera_frame);
-        tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);
+        tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);*/
 
-        for(size_t i = 0; i < _ball_in_robot_frame.size(); i++)
-            record_ball_trajectory(_ball_in_robot_frame[i][0],
-                    _ball_in_robot_frame[i][1],
-                    _ball_in_robot_frame[i][2],
+        _basket_in_camera_frame_average = get_average_vector_vector(_basket_in_camera_frame);
+        for(size_t i = 0; i < _ball_in_camera_frame.size(); i++)
+            record_ball_trajectory(_ball_in_camera_frame[i][0],
+                    _ball_in_camera_frame[i][1],
+                    _ball_in_camera_frame[i][2],
                     _time_stamp_vector[i],
                     _gripper_status_vector[i],
-                    _basket_in_robot_frame_average[0] ,
-                    _basket_in_robot_frame_average[1],
-                    _basket_in_robot_frame_average[2]);
+                    _basket_in_camera_frame_average[0] ,
+                    _basket_in_camera_frame_average[1],
+                    _basket_in_camera_frame_average[2]);
+
+        ROS_WARN("FINISHED RECORDING");
     }
 
     //this function will return the average of each column in the vector of vectors
@@ -200,6 +204,8 @@ public:
     }
 
     void transform_and_reinitialize(){
+        ROS_WARN("trying to transform and reinitialize");
+
         transfrom_record_all_points();
 
         for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
@@ -310,15 +316,22 @@ public:
                     circle( drawing, center[largest_contour_index],
                             (int)radius[largest_contour_index], color, 2, 8, 0 );
                     _object_center = center[largest_contour_index];
+                    //ROS_WARN_STREAM("blob center is: " << _object_center.x << ", " << _object_center.y);
 
                     circle(_im, _object_center, radius[largest_contour_index], Scalar(255, 0, 0), 5);
                     _valid_object = true;
-                    //get and "record" ball position
+
                     if(_record){
-                        rgbd_utils::RGBD_to_Pointcloud converter(_depth_msg,
-                                                                 _rgb_msg,
-                                                                 _camera_info_msg);
+                        //get and "record" ball position
+                        rgbd_utils::RGBD_to_Pointcloud converter;
+                        converter.set_depth(*_depth_msg);
+                        converter.set_rgb(*_rgb_msg);
+                        converter.set_rgb_info(*_camera_info_msg);
+                        converter.convert();
                         sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
+                        if(ptcl_msg.data.empty())
+                            ROS_WARN_STREAM("Seems output of rgbd utils is empty, size reading gives: " << ptcl_msg.data.size());
+
                         pcl::PointCloud<pcl::PointXYZRGBA>::Ptr
                                 input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
 
@@ -326,14 +339,13 @@ public:
                         if(!input_cloud->empty()){
                             pcl::PointXYZRGBA pt_ball = input_cloud->at(std::round(_object_center.x) +
                                                                         std::round(_object_center.y) * input_cloud->width);
+                            ROS_WARN_STREAM("The 3D values for ball position is: " << pt_ball.x << ", " << pt_ball.y << ", " << pt_ball.z);
 
                             std::vector<std::vector<double>> markers_positions;
-
                             for(size_t i = 0; i < _marker_center.size(); i++){
                                 pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center[i](0)) + std::round(_marker_center[i](1)) * input_cloud->width);
-
-                                                                                         if(pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z)
-                                                                                         markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
+                                if(pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z)
+                                            markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
                             }
 
                             if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z){
@@ -383,6 +395,7 @@ public:
 
     void record_ball_trajectory(double p_x, double p_y, double p_z,
                                 double time_stamp, bool gripper_status, double basket_x, double basket_y, double basket_z){
+        //ROS_WARN("Recording :):)");
         _output_file << p_x << ","
                      << p_y << ","
                      << p_z << ","
