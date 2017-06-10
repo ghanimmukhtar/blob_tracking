@@ -6,6 +6,13 @@
     07/06/2017
 """ 
 
+
+
+import matplotlib
+
+matplotlib.use("GTKAgg")
+
+
 import numpy as np
 
 from filterpy.kalman import KalmanFilter
@@ -15,6 +22,9 @@ from filterpy.stats import plot_covariance_ellipse
 from matplotlib import cm
 
 import matplotlib.pyplot as plt
+
+plt.ion()
+
 
 import balltraj
 
@@ -245,7 +255,7 @@ def process_and_plot_traj_stateandt(tfile,kf=None):
 
 
 
-def plot_output(traj,pred,sigma2,pol,statevector=None, xdata=None):
+def plot_output(traj,pred,sigma2,pol,statevector=None, xdata=None, basket_z=z_threshold):
 	f, subaxes = plt.subplots(1, 3, sharey=True)
 	cmap = cm.rainbow
 	x_range = xdata if xdata != None else np.arange(traj.shape[0])
@@ -267,7 +277,7 @@ def plot_output(traj,pred,sigma2,pol,statevector=None, xdata=None):
 			bar = f.colorbar(scplot,ticks=[0., 0.2,0.4,0.6,0.8, 1]);
 			bar.ax.set_ylabel("Outlier probability")
 		if(i==2):
-			ax.plot(x_range,[z_threshold]*len(x_range),color='orange')
+			ax.plot(x_range,[basket_z]*len(x_range),color='orange')
 	return f
 
 

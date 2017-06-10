@@ -5,6 +5,13 @@
     ISIR CNRS/UPMC
     08/06/2017
 """ 
+#
+#import matplotlib
+#matplotlib.use("GTKAgg")
+
+
+import filternew_secondorder
+
 
 import numpy as np
 
@@ -14,11 +21,6 @@ import balltraj
 
 from std_msgs.msg import Float64MultiArray, MultiArrayDimension, MultiArrayLayout
 from geometry_msgs.msg import PoseStamped
-
-import matplotlib
-#matplotlib.use("GTKAgg")
-
-import filternew_secondorder
 
 trajectory_data_topic = "/ball_trajectory"
 trajectory_data_msgtype = Float64MultiArray
@@ -58,7 +60,7 @@ class RosTrajectoryAnalysis:
 		out = balltraj.load_traj_with_ts_and_state("throw_ball_trials_2/10_th/ball_trajectory_robot_frame_2.csv")		
 		self.current_trajdata = out[0]
 		self.current_tsdata = out[1]
-		self.current_gripperdata = out[1]
+		self.current_gripperdata = out[2		]
 		# Output data
 		self.intersect_pos = None
 		self.intersect_ts = None
@@ -69,26 +71,22 @@ class RosTrajectoryAnalysis:
 		self.n_gripper=0
 		
 	def cb_trajdata(self,msg):
-                print("Received ball trajectory data and processing")
 		rawdata = np.array(msg.data)
 		npoints = len(rawdata)/3
 		self.current_trajdata = np.reshape(rawdata,(npoints,3))
 		self.n_traj +=1
 	
 	def cb_tsdata(self,msg):
-                print("Received time stamp data and processing")
 		rawdata = np.array(msg.data)
 		self.current_tsdata = rawdata
 		self.n_ts +=1
 	
 	def cb_gripperdata(self,msg):
-                print("Received gripping data and processing")
 		rawdata = np.array(msg.data,dtype=int)
 		self.current_gripperdata = rawdata
 		self.n_gripper +=1
 
 	def cb_basket(self,msg):
-                print("Received basket data and processing")
 		rawdata = np.array(msg.data)
 		npoints = len(rawdata)/3
 		self.basket_position = np.reshape(rawdata,(npoints,3)).mean(axis=0) # Should be robust even if Ghanim directly publishes the mean
@@ -103,21 +101,14 @@ class RosTrajectoryAnalysis:
 		
 
 	def process_tdata(self):
-                print ("ball trajectory is: ")
-                print (self.current_trajdata)
-                print ("basket position is: ")
-                print (self.basket_position)
-                print ("gripper data is: ")
-                print (self.current_gripperdata)
-                print ("time stamp data is: ")
-                print (self.current_tsdata)
-
 		self.filter.reset_filter(initpos=self.current_trajdata[0,:])
 		out_x, out_sigma2, out_pol, index_throw = filternew_secondorder.test_filter_outlier_dt_state(self.filter,(self.current_trajdata, self.current_tsdata, self.current_gripperdata))
 		intersect_tr, success_tr, time_tr = balltraj.locate_basket_intersection(self.current_trajdata,index_throw=index_throw,basket_xy_coords=self.basket_position[:2],basket_level=self.basket_position[2],ts=self.current_tsdata)
 		intersect_kf, success_kf, time_kf = balltraj.locate_basket_intersection(out_x,index_throw=index_throw,basket_xy_coords=self.basket_position[:2],basket_level=self.basket_position[2],ts=self.current_tsdata)
 		print("Intersection according to the raw trajectory : %s" % str(intersect_tr))
 		print("Intersection according to the Kalman filter : %s" % str(intersect_kf))
+		self.plot(self.current_trajdata,out_x,out_sigma2,out_pol,self.current_gripperdata,self.current_tsdata)
+		print("Done plotting")
 		if(self.mode=='kalman'):
 			self.intersect_pos = intersect_kf
 			self.intersect_ts = time_kf
@@ -127,14 +118,21 @@ class RosTrajectoryAnalysis:
 		self.seq += 1
 		#return ((intersect_tr, success_tr, time_tr),(intersect_kf, success_kf, time_kf),out_x)
 	
+	def plot(self,basetraj,outx,outs2,outpol,state,ts):
+		filternew_secondorder.plt.close()
+		filternew_secondorder.plot_output(basetraj,outx,outs2,outpol,statevector=state, xdata=ts, basket_z=self.basket_position[2])
+		filternew_secondorder.plt.show()
+		filternew_secondorder.plt.savefig("figure-%d.png" % self.seq)		
+		#filternew_secondorder.plt.pause(.001)
+	
+	
 	def publish_intersect(self):
 		if(self.intersect_pos is not None):
 			msg = intersect_data_msgtype()
 			msg.header.seq = self.seq
 			sec = int(np.fix(self.intersect_ts))
 			nsec = int(np.round((self.intersect_ts - sec)*1e9))
-			#msg.header.stamp.sec = sec
-			#msg.header.stamp.nsec = nsec
+			msg.header.stamp.set(sec, nsec)
 			msg.pose.position.x = self.intersect_pos[0]
 			msg.pose.position.y = self.intersect_pos[1]
 			msg.pose.position.z = self.intersect_pos[2]
