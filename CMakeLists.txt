@@ -13,12 +13,16 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   std_msgs
   tf
+  baxter_core_msgs
 )
+
+catkin_python_setup()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -fPIC")
 
-find_package(Eigen3 REQUIRED)
+
 find_package(PCL 1.7 REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 include_directories(/usr/local/include)
 
@@ -41,8 +45,12 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
+install(PROGRAMS   scripts/ros_traj   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(PROGRAMS   scripts/balltraj   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(PROGRAMS   scripts/filternew_secondorder   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
 add_executable(blob_tracking src/blob_tracking.cpp)
-target_link_libraries(blob_tracking ${catkin_LIBRARIES} ${PCL_LIBRARIES} rgbd_utils )
+target_link_libraries(blob_tracking /usr/local/lib/libaruco.so ${catkin_LIBRARIES} ${PCL_LIBRARIES} rgbd_utils )
 
 add_executable(points_transformer src/points_transformer.cpp)
 target_link_libraries(points_transformer ${catkin_LIBRARIES} )

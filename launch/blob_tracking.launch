@@ -1,11 +1,16 @@
-<launch> 
-  <!--include file="$(find freenect_launch)/launch/freenect.launch">
-    <arg name="rgb_frame_id" value="camera_rgb_optical_frame"/>
-    <arg name="depth_frame_id" value="camera_depth_optical_frame"/>
-  </include-->
+<launch>  
+  <include file="$(find kinect2_bridge)/launch/kinect2_bridge.launch">
+    <!-- These args are workarounds for tf_prefix issues in freenect.launch -->
+    <arg name="depth_method" value="opengl"/>
+    <arg name="reg_method" value="cpu"/>
+  </include>
+
+  <arg name="camera_link_pose" default="0.82 0.017 1.853 0.633 -0.495 -0.441 -0.401"/>
+ 
+  <node name="statict_transform" pkg="tf" type="static_transform_publisher" args=" $(arg camera_link_pose) /world /camera_link 100"/>
  
   <rosparam command="load" file="$(find blob_tracking)/launch/params/global_params.yml"/>
-  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" launch-prefix="gdb -ex run --args">
-  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" -->
+  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" launch-prefix="gdb -ex run -r-args"-->
+  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" >
   </node>
 </launch>
