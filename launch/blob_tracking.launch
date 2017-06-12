@@ -9,7 +9,7 @@
   <node name="statict_transform" pkg="tf" type="static_transform_publisher" args=" $(arg camera_link_pose) /world /camera_link 100"/>
  
   <rosparam command="load" file="$(find blob_tracking)/launch/params/global_params.yml"/>
-  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" launch-prefix="gdb -ex run --args">
-  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" -->
+  <!--node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" launch-prefix="gdb -ex run -r-args"-->
+  <node name="blob_tracking_node" pkg="blob_tracking" type="blob_tracking" output="screen" >
   </node>
 </launch>
