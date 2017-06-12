@@ -1,7 +1,7 @@
 <launch>  
   <include file="$(find kinect2_bridge)/launch/kinect2_bridge.launch">
     <!-- These args are workarounds for tf_prefix issues in freenect.launch -->
-    <arg name="depth_method" value="opengl"/>
+    <arg name="depth_method" value="opencl"/>
   </include>
 
   <arg name="camera_link_pose" default="0.82 0.017 1.853 0.633 -0.495 -0.441 -0.401"/>
