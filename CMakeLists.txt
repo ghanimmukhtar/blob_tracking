@@ -54,3 +54,6 @@ target_link_libraries(blob_tracking /usr/local/lib/libaruco.so ${catkin_LIBRARIE
 
 add_executable(points_transformer src/points_transformer.cpp)
 target_link_libraries(points_transformer ${catkin_LIBRARIES} )
+
+add_executable(conversions_frames_angles src/conversions_frames_angles.cpp)
+target_link_libraries(conversions_frames_angles ${catkin_LIBRARIES} )

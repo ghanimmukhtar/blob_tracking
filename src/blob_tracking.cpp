@@ -65,21 +65,40 @@ public:
         _upper_1 = std::stod(_parameters["upper_1"]);
         _upper_2 = std::stod(_parameters["upper_2"]);
         _upper_3 = std::stod(_parameters["upper_3"]);
+        _epsilon = std::stod(_parameters["epsilon"]);
         _radius_threshold = std::stod(_parameters["radius"]);
         _first_successful_iteration = false;
     }
 
+    //get largest difference between elements of two vectors
+    double largest_difference(std::vector<double> &first, std::vector<double> &second){
+        Eigen::VectorXd difference(first.size());
+        double my_max = 0;
+        for(size_t j = 0; j < first.size(); ++j)
+            difference(j) = fabs(first[j] - second[j]);
+        for(size_t j = 0; j < first.size(); ++j){
+            if(difference(j) > my_max)
+                my_max = difference(j);
+        }
+        return my_max;
+    }
+
+    void optimize_vector_of_vectors(std::vector<std::vector<double>>& vector_to_optimize){
+        //make a copy to work with and another to be the output
+        std::vector<std::vector<double>> working_copy = vector_to_optimize;
+        for(unsigned i = 0; i < working_copy.size(); i++)
+            for(unsigned j = 1; j < working_copy.size(); j++)
+                if(largest_difference(working_copy[i], working_copy[j]) < _epsilon)
+                    working_copy.erase(working_copy.begin() + j);
+        vector_to_optimize = working_copy;
+    }
+
     void trajectory_finished_cb(const std_msgs::Bool::ConstPtr& trajectory_finished){
         _trajectory_finished = trajectory_finished->data;
-        _image_count = 0;
-
-
-        ROS_WARN_STREAM("trying to process the data now, size is: " << _depth_topics_vector.size());
         for(size_t j = 0; j < _depth_topics_vector.size(); j++)
             update(j);
-
-        for(size_t i = 0; i < _traj_images.size(); i++)
-            imwrite( "_Image_" + std::to_string(i) + ".jpg", _traj_images[i]);
+        //_update_finished = true;
+        optimize_vector_of_vectors(_ball_in_camera_frame);
         _rgb_topics_vector.clear();
         _depth_topics_vector.clear();
         _camera_info_topics_vector.clear();
@@ -96,7 +115,7 @@ public:
         ROS_INFO("Converting point into robot frame ...");
         tf::TransformListener listener;
         tf::StampedTransform stamped_transform;
-        std::string child_frame = "/camera_depth_optical_frame";
+        std::string child_frame = "/kinect2_rgb_optical_frame";
         std::string parent_frame = "/world";
         try{
             listener.lookupTransform(child_frame, parent_frame,
@@ -120,12 +139,12 @@ public:
 
         try{
             listener.transformPoint(parent_frame, camera_point, base_point);
-            /*ROS_INFO("camera_depth_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
+            ROS_INFO("kinect2_rgb_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
                      camera_point.point.x, camera_point.point.y, camera_point.point.z,
-                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());*/
+                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
         }
         catch(tf::TransformException& ex){
-            /*ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());*/
+            ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
         }
         object_pose_in_robot_frame.push_back(base_point.point.x);
         object_pose_in_robot_frame.push_back(base_point.point.y);
@@ -138,23 +157,23 @@ public:
             ROS_ERROR("NO DATA RECORDED, FAILED ITERATION !!!");
             return;
         }
-        /*_ball_in_robot_frame.resize(_ball_in_camera_frame.size());
+        _ball_in_robot_frame.resize(_ball_in_camera_frame.size());
         _basket_in_robot_frame.resize(_basket_in_camera_frame.size());
         for(size_t i = 0; i < _ball_in_camera_frame.size(); i++){
             tf_base_conversion(_ball_in_camera_frame[i], _ball_in_robot_frame[i]);
         }
         _basket_in_camera_frame_average = get_average_vector_vector(_basket_in_camera_frame);
-        tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);*/
+        tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);
 
-        for(size_t i = 0; i < _ball_in_camera_frame.size(); i++)
-            record_ball_trajectory(_ball_in_camera_frame[i][0],
-                    _ball_in_camera_frame[i][1],
-                    _ball_in_camera_frame[i][2],
+        for(size_t i = 0; i < _ball_in_robot_frame.size(); i++)
+            record_ball_trajectory(_ball_in_robot_frame[i][0],
+                    _ball_in_robot_frame[i][1],
+                    _ball_in_robot_frame[i][2],
                     _time_stamp_vector[i],
                     _gripper_status_vector[i],
-                    0 ,
-                    0,
-                    0);
+                    _basket_in_robot_frame_average[0],
+                    _basket_in_robot_frame_average[1],
+                    _basket_in_robot_frame_average[2]);
     }
 
     //this function will return the average of each column in the vector of vectors
@@ -249,22 +268,21 @@ public:
             _rgb_topics_vector.push_back(_images_sub->get_rgb());
             _depth_topics_vector.push_back(_images_sub->get_depth());
             _camera_info_topics_vector.push_back(_images_sub->get_rgb_info());
+
+            ROS_WARN_STREAM("some indicatif text: " << _images_sub->get_rgb().data.empty() << " " << _images_sub->get_depth().data.empty());
         }
 
-        if(!_record && _trajectory_finished){
+        if(!_record && _trajectory_finished ){
             transform_and_reinitialize();
             _trajectory_finished = false;
         }
     }
 
     void update(int i){
-        //        _rgb_msg.reset(new sensor_msgs::Image(_images_sub->get_rgb()));
-        //        _depth_msg.reset(new sensor_msgs::Image(_images_sub->get_depth()));
-        //        _camera_info_msg.reset(new sensor_msgs::CameraInfo(_images_sub->get_rgb_info()));
         _rgb_msg.reset(new sensor_msgs::Image(_rgb_topics_vector[i]));
         _depth_msg.reset(new sensor_msgs::Image(_depth_topics_vector[i]));
         _camera_info_msg.reset(new sensor_msgs::CameraInfo(_camera_info_topics_vector[i]));
-        //ROS_WARN_STREAM("some indicatif text " << _rgb_msg->data.empty() << " " << _depth_msg->data.empty());
+
         cv_bridge::CvImagePtr cv_ptr;
         Mat threshold_output;
         vector<vector<Point> > contours;
@@ -331,9 +349,6 @@ public:
 
                     circle(_im, _object_center, radius[largest_contour_index], Scalar(255, 0, 0), 5);
                     _valid_object = true;
-                    //get and "record" ball position
-                    //if(_record){
-
                     rgbd_utils::RGBD_to_Pointcloud converter(_depth_msg,
                                                              _rgb_msg,
                                                              _camera_info_msg);
@@ -357,7 +372,6 @@ public:
 
                         if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z){
                             //ROS_WARN_STREAM("The 3D values for ball position is: " << pt_ball.x << ", " << pt_ball.y << ", " << pt_ball.z);
-
                             _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
                             if(!markers_positions.empty())
                                 _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));
@@ -369,28 +383,20 @@ public:
                             _gripper_status_vector.push_back(_gripper_status);
                         }
                     }
-                    //}
-
                 }
                 else
                     _valid_object = false;
             }
-
-
-            //if(_record && !_trajectory_finished && _trajectory_index > 0)
             _traj_images.push_back(_im);
 
             /// Show in a window
-            //cv::namedWindow("Original image", cv::WINDOW_AUTOSIZE);
-            //cv::imshow("Original image", _im);
-            /*cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
-            cv::imshow("Mask image", _im_tennis_ball_hue);
-            namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
-            imshow( "Contours", drawing );*/
-            //waitKey(1);
+            cv::namedWindow("Original image", cv::WINDOW_AUTOSIZE);
+            cv::imshow("Original image", _im);
+            waitKey(1);
         }
         catch (...)
         {
+            ROS_ERROR("Something went wrong !!!");
             if(_first_successful_iteration)
                 ROS_ERROR("Something went wrong !!!");
             return;
@@ -419,7 +425,6 @@ public:
     void trajectory_index_cb(const std_msgs::Int64::ConstPtr& index){
         if(_record){
             _trajectory_index = index->data;
-            //_output_file.close();
             _output_file.open("ball_trajectory_robot_frame_" + std::to_string(_trajectory_index) + ".csv");
             _starting_time = ros::Time::now().toSec();
         }
@@ -463,10 +468,10 @@ private:
     std::vector<bool>_gripper_status_vector;
 
     double _lower_1, _lower_2, _lower_3, _upper_1,
-    _upper_2, _upper_3, _largest_area = 0, _starting_time = 0;
+    _upper_2, _upper_3, _largest_area = 0, _starting_time = 0, _epsilon = 0;
     float _radius_threshold, _marker_size = 0.12;
     int _largest_contour_index, _trajectory_index;
-    bool _record, _valid_object, _gripper_status, _first_successful_iteration, _trajectory_finished;
+    bool _record, _valid_object, _gripper_status, _first_successful_iteration, _trajectory_finished, _update_finished = false;
 };
 
 int main(int argc, char **argv){
