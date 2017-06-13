@@ -103,6 +103,7 @@ public:
         _depth_topics_vector.clear();
         _camera_info_topics_vector.clear();
         _traj_images.clear();
+        _ball_blob_clustered.clear();
     }
 
     //Convert object position from camera frame to robot frame
@@ -358,8 +359,15 @@ public:
 
                     pcl::fromROSMsg(ptcl_msg, *input_cloud);
                     if(!input_cloud->empty()){
-                        pcl::PointXYZRGBA pt_ball = input_cloud->at(std::round(_object_center.x) +
-                                                                    std::round(_object_center.y) * input_cloud->width);
+                        for(size_t x = 0; x < _im_tennis_ball_hue.rows; x++)
+                            for(size_t y = 0; y < _im_tennis_ball_hue.cols; y++)
+                                if(pow(x - std::round(_object_center.x), 2) + pow(y - std::round(_object_center.y), 2) < radius[largest_contour_index]){
+                                    pcl::PointXYZRGBA pt_ball = input_cloud->at(x + y * input_cloud->width);
+                                    if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z)
+                                        _ball_blob_clustered.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
+                                }
+                        //get the value closest to the camera in z
+                        std::vector<double> best_ball_point = get_closest_to_camera(_ball_blob_clustered);
 
                         std::vector<std::vector<double>> markers_positions;
 
@@ -370,18 +378,23 @@ public:
                                                                                      markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
                         }
 
-                        if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z){
-                            //ROS_WARN_STREAM("The 3D values for ball position is: " << pt_ball.x << ", " << pt_ball.y << ", " << pt_ball.z);
-                            _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
-                            if(!markers_positions.empty())
-                                _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));
-                            if(_depth_msg->header.stamp.toSec() - _starting_time < 0)
-                                _time_stamp_vector.push_back(0);
-                            else
-                                _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
 
-                            _gripper_status_vector.push_back(_gripper_status);
-                        }
+                        if(!best_ball_point.empty())
+                            ROS_WARN_STREAM("The 3D values for ball position is: " << best_ball_point[0] << ", "
+                                                                                                         << best_ball_point[1] << ", "
+                                                                                                         << best_ball_point[2]);
+                        else
+                            ROS_WARN("the best point is empty !!!!!!!!!!!!");
+                        _ball_in_camera_frame.push_back(best_ball_point);
+                        if(!markers_positions.empty())
+                            _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));
+                        if(_depth_msg->header.stamp.toSec() - _starting_time < 0)
+                            _time_stamp_vector.push_back(0);
+                        else
+                            _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
+
+                        _gripper_status_vector.push_back(_gripper_status);
+
                     }
                 }
                 else
@@ -403,6 +416,17 @@ public:
         }
     }
 
+    std::vector<double> get_closest_to_camera(std::vector<std::vector<double>> my_vector){
+        double min_z = std::numeric_limits<double>::infinity();
+        int index;
+        for(size_t i = 0; i < my_vector.size(); i++){
+            if(my_vector[i][2] < min_z){
+                min_z = my_vector[i][2];
+                index = i;
+            }
+        }
+        return my_vector[index];
+    }
 
     void record_ball_trajectory(double p_x, double p_y, double p_z,
                                 double time_stamp, bool gripper_status, double basket_x, double basket_y, double basket_z){
@@ -462,7 +486,7 @@ private:
     std::ofstream _output_file;
 
     std::vector<std::vector<double>> _ball_in_camera_frame, _basket_in_camera_frame,
-    _ball_in_robot_frame, _basket_in_robot_frame;
+    _ball_in_robot_frame, _basket_in_robot_frame, _ball_blob_clustered;
 
     std::vector<double> _time_stamp_vector, _basket_in_camera_frame_average, _basket_in_robot_frame_average;
     std::vector<bool>_gripper_status_vector;
