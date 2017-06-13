@@ -12,6 +12,7 @@
 
 #include <sensor_msgs/image_encodings.h>
 #include <std_msgs/Int64.h>
+#include <std_msgs/Int16.h>
 #include <std_msgs/Bool.h>
 
 #include <pcl/point_types.h>
@@ -41,22 +42,17 @@ public:
                                                           "/kinect2/qhd/image_depth_rect",
                                                           _nh));
 
-        _start_recording_sub = _nh.subscribe<std_msgs::Bool>("/record_ball_trajectory", 1,
-                                                             &Blob_detector::start_recording_cb, this);
-        _trajectory_finished_sub = _nh.subscribe<std_msgs::Bool>("/trajectory_finished", 1,
-                                                                 &Blob_detector::trajectory_finished_cb, this);
-        _trajectory_index_sub = _nh.subscribe<std_msgs::Int64>("/trajectory_index", 1,
-                                                               &Blob_detector::trajectory_index_cb, this);
+        _motion_status_sub = _nh.subscribe<std_msgs::Int16>("/baxter_throwing/status", 1, &Blob_detector::motion_status_cb, this);
         _gripper_release_sub = _nh.subscribe<baxter_core_msgs::EndEffectorState>
                 ("/robot/end_effector/right_gripper/state", 1, &Blob_detector::gripper_status, this);
 
-        _next_trajectory_execution_pub = _nh.advertise<std_msgs::Bool>("/execute_next_trajectory", 1);
+        _basket_geometry_position_pub = _nh.advertise<geometry_msgs::PoseStamped>("/baxter_throwing/basket_pose", 1);
         _ball_trajectory_pub = _nh.advertise<std_msgs::Float64MultiArray>("/ball_trajectory", 1);
         _basket_position_pub = _nh.advertise<std_msgs::Float64MultiArray>("/basket_position", 1);
         _gripping_pub = _nh.advertise<std_msgs::Float64MultiArray>("/gripping_status", 1);
         _time_stamp_pub = _nh.advertise<std_msgs::Float64MultiArray>("/trajectory_time_stamps", 1);
 
-        _camera_char.readFromXMLFile("/home/mukhtar/git/blob_tracking/data/camera_param_baxter.xml");
+        _camera_char.readFromXMLFile("/home/seungsu/devel/ws_baxter/src/blob_tracking/data/camera_param_baxter.xml");
 
         _nh.getParam("/", _parameters);
         _lower_1 = std::stod(_parameters["lower_1"]);
@@ -70,35 +66,23 @@ public:
         _first_successful_iteration = false;
     }
 
-    //get largest difference between elements of two vectors
-    double largest_difference(std::vector<double> &first, std::vector<double> &second){
-        Eigen::VectorXd difference(first.size());
-        double my_max = 0;
-        for(size_t j = 0; j < first.size(); ++j)
-            difference(j) = fabs(first[j] - second[j]);
-        for(size_t j = 0; j < first.size(); ++j){
-            if(difference(j) > my_max)
-                my_max = difference(j);
+    void motion_status_cb(const std_msgs::Int16::ConstPtr& status){
+        if(status->data == THROWING_STATUS_MOTION_START){
+            _syncronize_recording = true;
+            _trajectory_finished = false;
         }
-        return my_max;
+        else
+            _syncronize_recording = false;
+        if(status->data == THROWING_STATUS_LOOKFOR_BASKET)
+            update_basket_in_robot_frame();
+        if(status->data == THROWING_STATUS_MOTION_END){
+            _trajectory_finished = true;
+            do_post_traj_processing();
+        }
+
     }
 
-    void optimize_vector_of_vectors(std::vector<std::vector<double>>& vector_to_optimize){
-        //make a copy to work with and another to be the output
-        std::vector<std::vector<double>> working_copy = vector_to_optimize;
-        for(unsigned i = 0; i < working_copy.size(); i++){
-            for(unsigned j = 1; j < working_copy.size(); j++)
-                if(largest_difference(working_copy[i], working_copy[j]) < _epsilon){
-                    working_copy.erase(working_copy.begin() + j);
-                    _deleted_index.push_back(i);
-                }
-
-        }
-        vector_to_optimize = working_copy;
-    }
-
-    void trajectory_finished_cb(const std_msgs::Bool::ConstPtr& trajectory_finished){
-        _trajectory_finished = trajectory_finished->data;
+    void do_post_traj_processing(){
         for(size_t j = 0; j < _depth_topics_vector.size(); j++)
             update(j);
         //_update_finished = true;
@@ -127,6 +111,81 @@ public:
         _camera_info_topics_vector.clear();
         _traj_images.clear();
         _deleted_index.clear();
+    }
+
+    void update_basket_in_robot_frame(){
+
+        ROS_WARN("Try to get basket position");
+        sensor_msgs::ImageConstPtr rgb_msg, depth_msg;
+        sensor_msgs::CameraInfoConstPtr camera_info_msg;
+
+
+        depth_msg.reset(new sensor_msgs::Image(_images_sub->get_depth()));
+        rgb_msg.reset(new sensor_msgs::Image(_images_sub->get_rgb()));
+        camera_info_msg.reset(new sensor_msgs::CameraInfo(_images_sub->get_rgb_info()));
+        rgbd_utils::RGBD_to_Pointcloud converter(depth_msg,
+                                                 rgb_msg,
+                                                 camera_info_msg);
+
+        ROS_WARN_STREAM("depth image is filled, size: " << depth_msg->data.size());
+
+        config_and_detect_markers();
+        sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
+
+        pcl::PointCloud<pcl::PointXYZRGBA>::Ptr
+                input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+
+        pcl::fromROSMsg(ptcl_msg, *input_cloud);
+
+        ROS_INFO_STREAM("getting basket pose, cloud size is: " << input_cloud->points.size());
+        if(!input_cloud->empty()){
+            std::vector<std::vector<double>> markers_positions;
+
+            for(size_t q = 0; q < _marker_center.size(); q++){
+                pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center[q](0)) + std::round(_marker_center[q](1)) * input_cloud->width);
+
+                                                                         if(pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z)
+                                                                         markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
+
+            }
+            std::vector<double> basket_in_robot_frame, basket_in_camera_frame = get_average_vector_vector(markers_positions);
+            if(!markers_positions.empty())
+               tf_base_conversion(basket_in_camera_frame, basket_in_robot_frame);
+            _basket_pose_stamped.header.stamp = ros::Time::now();
+            _basket_pose_stamped.pose.position.x = basket_in_robot_frame[0];
+            _basket_pose_stamped.pose.position.y = basket_in_robot_frame[1];
+            _basket_pose_stamped.pose.position.z = basket_in_robot_frame[2];
+
+            _basket_geometry_position_pub.publish(_basket_pose_stamped);
+            }
+
+    }
+
+    //get largest difference between elements of two vectors
+    double largest_difference(std::vector<double> &first, std::vector<double> &second){
+        Eigen::VectorXd difference(first.size());
+        double my_max = 0;
+        for(size_t j = 0; j < first.size(); ++j)
+            difference(j) = fabs(first[j] - second[j]);
+        for(size_t j = 0; j < first.size(); ++j){
+            if(difference(j) > my_max)
+                my_max = difference(j);
+        }
+        return my_max;
+    }
+
+    void optimize_vector_of_vectors(std::vector<std::vector<double>>& vector_to_optimize){
+        //make a copy to work with and another to be the output
+        std::vector<std::vector<double>> working_copy = vector_to_optimize;
+        for(unsigned i = 0; i < working_copy.size(); i++){
+            for(unsigned j = 1; j < working_copy.size(); j++)
+                if(largest_difference(working_copy[i], working_copy[j]) < _epsilon){
+                    working_copy.erase(working_copy.begin() + j);
+                    _deleted_index.push_back(i);
+                }
+
+        }
+        vector_to_optimize = working_copy;
     }
 
     //Convert object position from camera frame to robot frame
@@ -188,16 +247,6 @@ public:
         }
         _basket_in_camera_frame_average = get_average_vector_vector(_basket_in_camera_frame);
         tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);
-
-        for(size_t i = 0; i < _ball_in_robot_frame.size(); i++)
-            record_ball_trajectory(_ball_in_robot_frame[i][0],
-                    _ball_in_robot_frame[i][1],
-                    _ball_in_robot_frame[i][2],
-                    _time_stamp_vector[i],
-                    _gripper_status_vector[i],
-                    _basket_in_robot_frame_average[0],
-                    _basket_in_robot_frame_average[1],
-                    _basket_in_robot_frame_average[2]);
     }
 
     //this function will return the average of each column in the vector of vectors
@@ -282,13 +331,10 @@ public:
         _basket_position.data.clear();
         _gripping_vector.data.clear();
         _time_stamp_trajectory.data.clear();
-
-        _execute_next_trajectory.data = true;
-        _next_trajectory_execution_pub.publish(_execute_next_trajectory);
     }
 
     void save_topics(){
-        if(_record && !_trajectory_finished && _trajectory_index > 0){
+        if(_syncronize_recording){
             _rgb_topics_vector.push_back(_images_sub->get_rgb());
             _depth_topics_vector.push_back(_images_sub->get_depth());
             _camera_info_topics_vector.push_back(_images_sub->get_rgb_info());
@@ -304,7 +350,7 @@ public:
             //ROS_WARN_STREAM("some indicatif text: " << _images_sub->get_rgb().data.empty() << " " << _images_sub->get_depth().data.empty());
         }
 
-        if(!_record && _trajectory_finished ){
+        if(!_syncronize_recording && _trajectory_finished ){
             transform_and_reinitialize();
             _trajectory_finished = false;
         }
@@ -328,8 +374,6 @@ public:
             _im = cv_ptr->image;
             medianBlur(_im, _im, 3);
             cvtColor(_im, _im_hsv, COLOR_BGR2HSV);
-
-
             //red color detection
             inRange(_im_hsv, Scalar(_lower_1, _lower_2, _lower_3, 0), Scalar(_upper_1, _upper_2, _upper_3, 0), _im_tennis_ball_hue);
 
@@ -439,44 +483,18 @@ public:
         }
     }
 
-
-    void record_ball_trajectory(double p_x, double p_y, double p_z,
-                                double time_stamp, bool gripper_status, double basket_x, double basket_y, double basket_z){
-        //ROS_WARN("Recording :):)");
-        _output_file << p_x << ","
-                     << p_y << ","
-                     << p_z << ","
-                     << time_stamp << ","
-                     << gripper_status << ","
-                     << basket_x << ","
-                     << basket_y << ","
-                     << basket_z << "\n";
-    }
-
-    void start_recording_cb(const std_msgs::Bool::ConstPtr& record){
-        _record = record->data;
-
-    }
-
-    void trajectory_index_cb(const std_msgs::Int64::ConstPtr& index){
-        if(_record){
-            _trajectory_index = index->data;
-            _output_file.open("ball_trajectory_robot_frame_" + std::to_string(_trajectory_index) + ".csv");
-            _starting_time = ros::Time::now().toSec();
-        }
-    }
-
     void gripper_status(const baxter_core_msgs::EndEffectorState::ConstPtr& state){
         _gripper_status = state->gripping;
     }
 
 private:
+    enum ENUM_THROWING_STATUS {THROWING_STATUS_IDLE=0, THROWING_STATUS_MOTION_START, THROWING_STATUS_MOTION_END, THROWING_STATUS_LOOKFOR_BASKET};
     ros::NodeHandle _nh;
     rgbd_utils::RGBD_Subscriber::Ptr _images_sub;
     XmlRpc::XmlRpcValue _parameters;
     image_transport::Subscriber _rgb_image_sub, _depth_image_sub;
-    ros::Publisher _next_trajectory_execution_pub, _ball_trajectory_pub, _basket_position_pub, _gripping_pub, _time_stamp_pub;
-    ros::Subscriber _start_recording_sub, _trajectory_index_sub, _gripper_release_sub, _trajectory_finished_sub;
+    ros::Publisher _ball_trajectory_pub, _basket_position_pub, _gripping_pub, _time_stamp_pub, _basket_geometry_position_pub;
+    ros::Subscriber _gripper_release_sub, _trajectory_finished_sub, _motion_status_sub;
     sensor_msgs::ImageConstPtr _rgb_msg, _depth_msg;
     sensor_msgs::CameraInfoConstPtr _camera_info_msg;
     aruco::MarkerDetector _aruco_detector;
@@ -488,12 +506,13 @@ private:
     std::vector<sensor_msgs::CameraInfo> _camera_info_topics_vector;
     std::vector<Mat> _traj_images;
     int _image_count;
-    std_msgs::Bool _execute_next_trajectory;
     std_msgs::Float64MultiArray _ball_trajectory, _basket_position, _gripping_vector, _time_stamp_trajectory;
     cv_bridge::CvImagePtr _cv_ptr;
     Mat _im, _im_hsv, _im_tennis_ball_hue;
     int _thresh = 100;
     Point2f _object_center;
+
+    geometry_msgs::PoseStamped _basket_pose_stamped;
 
     std::ofstream _output_file;
 
@@ -507,7 +526,7 @@ private:
     _upper_2, _upper_3, _largest_area = 0, _starting_time = 0, _epsilon = 0;
     float _radius_threshold, _marker_size = 0.12;
     int _largest_contour_index, _trajectory_index;
-    bool _record, _valid_object, _gripper_status, _first_successful_iteration, _trajectory_finished, _update_finished = false;
+    bool _valid_object, _gripper_status, _first_successful_iteration, _trajectory_finished, _update_finished = false, _syncronize_recording = false;
 };
 
 int main(int argc, char **argv){
