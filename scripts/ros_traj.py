@@ -107,7 +107,7 @@ class RosTrajectoryAnalysis:
 		intersect_kf, success_kf, time_kf = balltraj.locate_basket_intersection(out_x,index_throw=index_throw,basket_xy_coords=self.basket_position[:2],basket_level=self.basket_position[2],ts=self.current_tsdata)
 		print("Intersection according to the raw trajectory : %s" % str(intersect_tr))
 		print("Intersection according to the Kalman filter : %s" % str(intersect_kf))
-		self.plot(self.current_trajdata,out_x,out_sigma2,out_pol,self.current_gripperdata,self.current_tsdata)
+		#self.plot(self.current_trajdata,out_x,out_sigma2,out_pol,self.current_gripperdata,self.current_tsdata)
 		print("Done plotting")
 		if(self.mode=='kalman'):
 			self.intersect_pos = intersect_kf

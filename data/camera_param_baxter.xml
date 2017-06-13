@@ -1,18 +1,18 @@
 <?xml version="1.0"?>
 <opencv_storage>
         <image_width type_id="int">
-                <value>640</value>
+                <value>960</value>
 	</image_width>
         <image_height type_id="int">
-                <value>480</value>
+                <value>540</value>
 	</image_height>
 	<camera_matrix type_id="opencv-matrix">
 		<rows>3</rows>
 		<cols>3</cols>
 		<dt>d</dt>
 		<data>
-		 5.25000e+002 0. 3.1950000000000000e+002 
-		 0.           5.25000e+002 2.3950000000000000e+002 
+		 540.68603515625 0.0 479.75 
+		 0.0           540.68603515625 269.75
                  0. 0. 1.
 		</data>
 	</camera_matrix>
