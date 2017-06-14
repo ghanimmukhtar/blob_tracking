@@ -57,3 +57,6 @@ target_link_libraries(points_transformer ${catkin_LIBRARIES} )
 
 add_executable(conversions_frames_angles src/conversions_frames_angles.cpp)
 target_link_libraries(conversions_frames_angles ${catkin_LIBRARIES} )
+
+add_executable(test_code src/test_code.cpp)
+target_link_libraries(test_code ${catkin_LIBRARIES} )
