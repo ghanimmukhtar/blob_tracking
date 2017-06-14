@@ -87,33 +87,30 @@ public:
         ROS_WARN_STREAM("before updates the length of gripping vector is: " << _gripper_status_vector.size());
         ROS_WARN_STREAM("before updates the length of time stamp vector is: " << _time_stamp_vector.size());
         ROS_WARN_STREAM("before updates the length of ball trajectory vector is: " << _ball_in_camera_frame.size());*/
-
         for(size_t j = 0; j < _depth_topics_vector.size(); j++)
             update(j);
-        //_update_finished = true;
+        //optimize_vector_of_vectors(_ball_in_camera_frame);
 
+        for(size_t k = 0; k < _saved_index.size(); k++)
+            for(size_t y = 0; y < _gripper_status_vector.size(); y++)
+                if(_saved_index[k] == y)
+                    _gripper_status_final_vector.push_back(_gripper_status_vector[_saved_index[k]]);
 
-        /*ROS_WARN_STREAM("after updates the length of gripping vector is: " << _gripper_status_vector.size());
-        ROS_WARN_STREAM("after updates the length of time stamp vector is: " << _time_stamp_vector.size());
-        ROS_WARN_STREAM("after updates the length of ball trajectory vector is: " << _ball_in_camera_frame.size());*/
-        optimize_vector_of_vectors(_ball_in_camera_frame);
-        std::sort(_deleted_index.begin(), _deleted_index.end());  // Make sure the container is sorted
-        std::vector<double>::iterator it;
-        for (auto i = _deleted_index.rbegin(); i != _deleted_index.rend(); ++ i)
-        {
-            _gripper_status_vector.erase(_gripper_status_vector.begin() + *i);
-            _time_stamp_vector.erase(_time_stamp_vector.begin() + *i);
-        }
+        for(size_t k = 0; k < _saved_index.size(); k++)
+            for(size_t y = 0; y < _time_stamp_vector.size(); y++)
+                if(_saved_index[k] == y)
+                    _time_stamp_final_vector.push_back(_time_stamp_final_vector[_saved_index[k]]);
 
-        /*ROS_WARN_STREAM("after updates and optimize the length of gripping vector is: " << _gripper_status_vector.size());
-        ROS_WARN_STREAM("after updates and optimize the length of time stamp vector is: " << _time_stamp_vector.size());
-        ROS_WARN_STREAM("after updates and optimize the length of ball trajectory vector is: " << _ball_in_camera_frame.size());*/
+        ROS_WARN_STREAM("the length of depth images vector is: " << _depth_topics_vector.size());
+        ROS_WARN_STREAM("the length of gripping final vector is: " << _gripper_status_final_vector.size());
+        ROS_WARN_STREAM("the length of time stamp final vector is: " << _time_stamp_final_vector.size());
+        ROS_WARN_STREAM("the length of ball trajectory vector is: " << _ball_in_camera_frame.size());
 
         _rgb_topics_vector.clear();
         _depth_topics_vector.clear();
         _camera_info_topics_vector.clear();
         _traj_images.clear();
-        _deleted_index.clear();
+        _saved_index.clear();
     }
 
     void update_basket_in_robot_frame(){
@@ -193,7 +190,6 @@ public:
             for(unsigned j = 1; j < working_copy.size(); j++)
                 if(largest_difference(working_copy[i], working_copy[j]) < _epsilon){
                     working_copy.erase(working_copy.begin() + j);
-                    _deleted_index.push_back(j);
                 }
 
         }
@@ -322,12 +318,12 @@ public:
             _basket_position.data.push_back(_basket_in_robot_frame_average[i]);
         }
 
-        for(size_t i = 0; i < _gripper_status_vector.size(); i++){
-            _gripping_vector.data.push_back(_gripper_status_vector[i]);
+        for(size_t i = 0; i < _gripper_status_final_vector.size(); i++){
+            _gripping_vector.data.push_back(_gripper_status_final_vector[i]);
         }
 
-        for(size_t i = 0; i < _time_stamp_vector.size(); i++){
-            _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
+        for(size_t i = 0; i < _time_stamp_final_vector.size(); i++){
+            _time_stamp_trajectory.data.push_back(_time_stamp_final_vector[i]);
         }
 
         _ball_trajectory_pub.publish(_ball_trajectory);
@@ -337,6 +333,8 @@ public:
 
         _gripper_status_vector.clear();
         _time_stamp_vector.clear();
+        _gripper_status_final_vector.clear();
+        _time_stamp_final_vector.clear();
         _ball_in_camera_frame.clear();
         _ball_in_robot_frame.clear();
         _basket_in_camera_frame.clear();
@@ -467,25 +465,17 @@ public:
                         if(pt_ball.x == pt_ball.x && pt_ball.y == pt_ball.y && pt_ball.z == pt_ball.z){
                             //ROS_WARN_STREAM("The 3D values for ball position is: " << pt_ball.x << ", " << pt_ball.y << ", " << pt_ball.z);
                             _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
+                            _saved_index.push_back(i);
 
                             if(!markers_positions.empty())
                                 _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));
                         }
-                        else
-                            _deleted_index.push_back(i);
-                    }
-                    else
-                        _deleted_index.push_back(i);
-                }
-                else{
-                    _valid_object = false;
-                    _deleted_index.push_back(i);
-                }
-            }
-            else{
-                _deleted_index.push_back(i);
-            }
 
+                    }
+                }
+                else
+                    _valid_object = false;
+            }
             _traj_images.push_back(_im);
 
             /// Show in a window
@@ -495,7 +485,6 @@ public:
         }
         catch (...)
         {
-            _deleted_index.push_back(i);
             ROS_ERROR("Something went wrong !!!");
             if(_first_successful_iteration)
                 ROS_ERROR("Something went wrong !!!");
@@ -539,8 +528,8 @@ private:
     std::vector<std::vector<double>> _ball_in_camera_frame, _basket_in_camera_frame,
     _ball_in_robot_frame, _basket_in_robot_frame;
 
-    std::vector<double> _time_stamp_vector, _basket_in_camera_frame_average, _basket_in_robot_frame_average, _deleted_index;
-    std::vector<bool>_gripper_status_vector;
+    std::vector<double> _time_stamp_vector, _time_stamp_final_vector, _basket_in_camera_frame_average, _basket_in_robot_frame_average, _saved_index;
+    std::vector<bool>_gripper_status_vector, _gripper_status_final_vector;
 
     double _lower_1, _lower_2, _lower_3, _upper_1,
     _upper_2, _upper_3, _largest_area = 0, _starting_time = 0, _epsilon = 0;
