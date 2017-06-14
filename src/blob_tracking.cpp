@@ -36,11 +36,16 @@ public:
     }
 
     void init(){
-        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/kinect2/qhd/camera_info",
+        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/camera/rgb/camera_info",
+                                                          "/camera/rgb/image_raw",
+                                                          "/camera/depth/camera_info",
+                                                          "/camera/depth/image_raw",
+                                                          _nh));
+        /*_images_sub.reset(new rgbd_utils::RGBD_Subscriber("/kinect2/qhd/camera_info",
                                                           "/kinect2/qhd/image_color_rect",
                                                           "/kinect2/qhd/camera_info",
                                                           "/kinect2/qhd/image_depth_rect",
-                                                          _nh));
+                                                          _nh));*/
 
         _motion_status_sub = _nh.subscribe<std_msgs::Int16>("/baxter_throwing/status", 1, &Blob_detector::motion_status_cb, this);
         _gripper_release_sub = _nh.subscribe<baxter_core_msgs::EndEffectorState>
@@ -52,7 +57,8 @@ public:
         _gripping_pub = _nh.advertise<std_msgs::Float64MultiArray>("/gripping_status", 1);
         _time_stamp_pub = _nh.advertise<std_msgs::Float64MultiArray>("/trajectory_time_stamps", 1);
 
-        _camera_char.readFromXMLFile("/home/seungsu/devel/ws_baxter/src/blob_tracking/data/camera_param_baxter.xml");
+        //_camera_char.readFromXMLFile("/home/seungsu/devel/ws_baxter/src/blob_tracking/data/camera_param_baxter.xml");
+        _camera_char.readFromXMLFile("/home/ghanim/git/blob_tracking/data/camera_param_baxter.xml");
 
         _nh.getParam("/", _parameters);
         _lower_1 = std::stod(_parameters["lower_1"]);
@@ -68,6 +74,7 @@ public:
 
     void motion_status_cb(const std_msgs::Int16::ConstPtr& status){
         if(status->data == THROWING_STATUS_MOTION_START){
+            _starting_time = ros::Time::now().toSec();
             _syncronize_recording = true;
             _trajectory_finished = false;
         }
@@ -93,18 +100,36 @@ public:
 
         for(size_t k = 0; k < _saved_index.size(); k++)
             for(size_t y = 0; y < _gripper_status_vector.size(); y++)
-                if(_saved_index[k] == y)
+                if(_saved_index[k] == y){
+                    /*ROS_WARN_STREAM(k << " trying to get element: " << _saved_index[k] <<
+                                    " from gripper original vector, which has size of: " <<
+                                    _gripper_status_vector.size() <<
+                                    " the element is: " << _gripper_status_vector[_saved_index[k]]);*/
                     _gripper_status_final_vector.push_back(_gripper_status_vector[_saved_index[k]]);
+                }
+        //ROS_INFO("**************************************************************");
 
-        for(size_t k = 0; k < _saved_index.size(); k++)
-            for(size_t y = 0; y < _time_stamp_vector.size(); y++)
-                if(_saved_index[k] == y)
-                    _time_stamp_final_vector.push_back(_time_stamp_final_vector[_saved_index[k]]);
+//        for(size_t k = 0; k < _saved_index.size(); k++)
+//            for(size_t y = 0; y < _time_stamp_vector.size(); y++)
+//                if(_saved_index[k] == y){
+//                    /*ROS_WARN_STREAM(k << " trying to get element: " << _saved_index[k] <<
+//                                    " from gripper original vector, which has size of: " <<
+//                                    _time_stamp_vector.size() <<
+//                                    " the element is: " << _time_stamp_vector[_saved_index[k]]);*/
+//                    _time_stamp_final_vector.push_back(_time_stamp_vector[_saved_index[k]]);
+//                }
+
+        ROS_INFO("**************************************************************");
 
         ROS_WARN_STREAM("the length of depth images vector is: " << _depth_topics_vector.size());
         ROS_WARN_STREAM("the length of gripping final vector is: " << _gripper_status_final_vector.size());
         ROS_WARN_STREAM("the length of time stamp final vector is: " << _time_stamp_final_vector.size());
         ROS_WARN_STREAM("the length of ball trajectory vector is: " << _ball_in_camera_frame.size());
+
+        if(!_syncronize_recording && _trajectory_finished ){
+            transform_and_reinitialize();
+            _trajectory_finished = false;
+        }
 
         _rgb_topics_vector.clear();
         _depth_topics_vector.clear();
@@ -154,14 +179,14 @@ public:
                 }
                 std::vector<double> basket_in_robot_frame, basket_in_camera_frame = get_average_vector_vector(markers_positions);
                 if(!markers_positions.empty())
-                   tf_base_conversion(basket_in_camera_frame, basket_in_robot_frame);
+                    tf_base_conversion(basket_in_camera_frame, basket_in_robot_frame);
                 _basket_pose_stamped.header.stamp = ros::Time::now();
                 _basket_pose_stamped.pose.position.x = basket_in_robot_frame[0];
                 _basket_pose_stamped.pose.position.y = basket_in_robot_frame[1];
                 _basket_pose_stamped.pose.position.z = basket_in_robot_frame[2];
 
                 _basket_geometry_position_pub.publish(_basket_pose_stamped);
-                }
+            }
         }
         catch(...){
             ROS_ERROR("something went wrong !!!");
@@ -197,6 +222,53 @@ public:
     }
 
     //Convert object position from camera frame to robot frame
+    void tf_base_conversion(std::vector<std::vector<double>>& object_pose_in_camera_frame,
+                            std::vector<std::vector<double>>& object_pose_in_robot_frame){
+        if(object_pose_in_camera_frame.empty()){
+            ROS_ERROR("THE TRANSFORMATION IS IMPOSSIBLE, EMPTY VECTOR");
+            return;
+        }
+        //ROS_INFO("Converting point into robot frame ...");
+        tf::TransformListener listener;
+        tf::StampedTransform stamped_transform;
+        std::string child_frame = "/camera_rgb_optical_frame";
+        std::string parent_frame = "/world";
+        try{
+            listener.lookupTransform(child_frame, parent_frame,
+                                     ros::Time::now(), stamped_transform);
+        }
+        catch (tf::TransformException &ex) {
+            ROS_ERROR("%s",ex.what());
+            ros::Duration(1.0).sleep();
+        }
+
+        std::vector<geometry_msgs::PointStamped> camera_point;
+        std::vector<geometry_msgs::PointStamped> base_point;
+        camera_point.resize(object_pose_in_camera_frame.size());
+        base_point.resize(object_pose_in_camera_frame.size());
+        for(size_t i = 0; i < camera_point.size(); i++){
+            camera_point[i].header.frame_id = child_frame;
+
+            //we'll just use the most recent transform available for our simple example
+            camera_point[i].header.stamp = ros::Time();
+
+            camera_point[i].point.x = object_pose_in_camera_frame[i][0];
+            camera_point[i].point.y = object_pose_in_camera_frame[i][1];
+            camera_point[i].point.z = object_pose_in_camera_frame[i][2];
+
+            try{
+                listener.transformPoint(parent_frame, camera_point[i], base_point[i]);
+                /*ROS_INFO("kinect2_rgb_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
+                         camera_point[i].point.x, camera_point[i].point.y, camera_point[i].point.z,
+                         base_point[i].point.x, base_point[i].point.y, base_point[i].point.z, base_point[i].header.stamp.toSec());*/
+            }
+            catch(tf::TransformException& ex){
+                //ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
+            }
+            object_pose_in_robot_frame[i] = {base_point[i].point.x, base_point[i].point.y, base_point[i].point.z};
+        }
+    }
+
     void tf_base_conversion(std::vector<double>& object_pose_in_camera_frame,
                             std::vector<double>& object_pose_in_robot_frame){
         if(object_pose_in_camera_frame.empty()){
@@ -251,9 +323,8 @@ public:
         }
         _ball_in_robot_frame.resize(_ball_in_camera_frame.size());
         _basket_in_robot_frame.resize(_basket_in_camera_frame.size());
-        for(size_t i = 0; i < _ball_in_camera_frame.size(); i++){
-            tf_base_conversion(_ball_in_camera_frame[i], _ball_in_robot_frame[i]);
-        }
+        tf_base_conversion(_ball_in_camera_frame, _ball_in_robot_frame);
+
         _basket_in_camera_frame_average = get_average_vector_vector(_basket_in_camera_frame);
         tf_base_conversion(_basket_in_camera_frame_average, _basket_in_robot_frame_average);
     }
@@ -307,7 +378,6 @@ public:
 
     void transform_and_reinitialize(){
         transfrom_record_all_points();
-
         for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
             _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
             _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
@@ -322,8 +392,8 @@ public:
             _gripping_vector.data.push_back(_gripper_status_final_vector[i]);
         }
 
-        for(size_t i = 0; i < _time_stamp_final_vector.size(); i++){
-            _time_stamp_trajectory.data.push_back(_time_stamp_final_vector[i]);
+        for(size_t i = 0; i < _time_stamp_vector.size(); i++){
+            _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
         }
 
         _ball_trajectory_pub.publish(_ball_trajectory);
@@ -356,19 +426,17 @@ public:
             if(!_images_sub->get_depth().data.empty()){
                 _gripper_status_vector.push_back(_gripper_status);
 
-                if(_images_sub->get_depth().header.stamp.toSec() - _starting_time < 0)
-                    _time_stamp_vector.push_back(0);
-                else
-                    _time_stamp_vector.push_back(_images_sub->get_depth().header.stamp.toSec() - _starting_time);
+//                if(_images_sub->get_depth().header.stamp.toSec() - _starting_time < 0)
+//                    _time_stamp_vector.push_back(0);
+//                else
+//                    _time_stamp_vector.push_back(_images_sub->get_depth().header.stamp.toSec() - _starting_time);
             }
             //ROS_WARN_STREAM("some indicatif text: " << _images_sub->get_rgb().data.empty() << " " << _images_sub->get_depth().data.empty());
         }
 
-        if(!_syncronize_recording && _trajectory_finished ){
-            transform_and_reinitialize();
-            _trajectory_finished = false;
-        }
-
+//        if(!_syncronize_recording ){
+//            ROS_INFO("waiting to launch the following of a green ball !!!!");
+//        }
     }
 
     void update(int i){
@@ -466,6 +534,7 @@ public:
                             //ROS_WARN_STREAM("The 3D values for ball position is: " << pt_ball.x << ", " << pt_ball.y << ", " << pt_ball.z);
                             _ball_in_camera_frame.push_back({pt_ball.x, pt_ball.y, pt_ball.z});
                             _saved_index.push_back(i);
+                            _time_stamp_vector.push_back(_depth_msg->header.stamp.toSec() - _starting_time);
 
                             if(!markers_positions.empty())
                                 _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));

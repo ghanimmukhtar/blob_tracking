@@ -15,7 +15,7 @@ void tf_base_conversion(std::vector<std::vector<double>>& object_pose_in_camera_
     //ROS_INFO("Converting point into robot frame ...");
     tf::TransformListener listener;
     tf::StampedTransform stamped_transform;
-    std::string child_frame = "/kinect2_rgb_optical_frame";
+    std::string child_frame = "/camera_rgb_optical_frame";
     std::string parent_frame = "/world";
     try{
         listener.lookupTransform(child_frame, parent_frame,
