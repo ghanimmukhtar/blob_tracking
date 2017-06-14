@@ -146,5 +146,5 @@ class RosTrajectoryAnalysis:
 			
 			
 if(__name__ == '__main__'):
-	rta = RosTrajectoryAnalysis(mode="kalman") # mode="raw" to use raw trajectory data
+	rta = RosTrajectoryAnalysis(mode="raw") # mode="raw" to use raw trajectory data
 rta.start_node()

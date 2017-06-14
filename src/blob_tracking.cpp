@@ -83,28 +83,31 @@ public:
     }
 
     void do_post_traj_processing(){
+        /*ROS_WARN_STREAM("before updates the length of depth images vector is: " << _depth_topics_vector.size());
+        ROS_WARN_STREAM("before updates the length of gripping vector is: " << _gripper_status_vector.size());
+        ROS_WARN_STREAM("before updates the length of time stamp vector is: " << _time_stamp_vector.size());
+        ROS_WARN_STREAM("before updates the length of ball trajectory vector is: " << _ball_in_camera_frame.size());*/
+
         for(size_t j = 0; j < _depth_topics_vector.size(); j++)
             update(j);
         //_update_finished = true;
 
 
-        ROS_WARN_STREAM("after updates the length of gripping vector is: " << _gripper_status_vector.size());
+        /*ROS_WARN_STREAM("after updates the length of gripping vector is: " << _gripper_status_vector.size());
         ROS_WARN_STREAM("after updates the length of time stamp vector is: " << _time_stamp_vector.size());
-        ROS_WARN_STREAM("after updates the length of ball trajectory vector is: " << _ball_in_camera_frame.size());
+        ROS_WARN_STREAM("after updates the length of ball trajectory vector is: " << _ball_in_camera_frame.size());*/
         optimize_vector_of_vectors(_ball_in_camera_frame);
+        std::sort(_deleted_index.begin(), _deleted_index.end());  // Make sure the container is sorted
+        std::vector<double>::iterator it;
+        for (auto i = _deleted_index.rbegin(); i != _deleted_index.rend(); ++ i)
+        {
+            _gripper_status_vector.erase(_gripper_status_vector.begin() + *i);
+            _time_stamp_vector.erase(_time_stamp_vector.begin() + *i);
+        }
 
-        for(size_t k = 0; k < _gripper_status_vector.size(); k++)
-            for(size_t u = 0; u < _deleted_index.size(); u++)
-                if(k == _deleted_index[u])
-                    _gripper_status_vector.erase(_gripper_status_vector.begin() + k);
-        for(size_t k = 0; k < _time_stamp_vector.size(); k++)
-            for(size_t u = 0; u < _deleted_index.size(); u++)
-                if(k == _deleted_index[u])
-                    _time_stamp_vector.erase(_time_stamp_vector.begin() + k);
-
-        ROS_WARN_STREAM("after updates and optimize the length of gripping vector is: " << _gripper_status_vector.size());
+        /*ROS_WARN_STREAM("after updates and optimize the length of gripping vector is: " << _gripper_status_vector.size());
         ROS_WARN_STREAM("after updates and optimize the length of time stamp vector is: " << _time_stamp_vector.size());
-        ROS_WARN_STREAM("after updates and optimize the length of ball trajectory vector is: " << _ball_in_camera_frame.size());
+        ROS_WARN_STREAM("after updates and optimize the length of ball trajectory vector is: " << _ball_in_camera_frame.size());*/
 
         _rgb_topics_vector.clear();
         _depth_topics_vector.clear();
@@ -114,8 +117,8 @@ public:
     }
 
     void update_basket_in_robot_frame(){
-
         ROS_WARN("Try to get basket position");
+        cv_bridge::CvImagePtr cv_ptr;
         sensor_msgs::ImageConstPtr rgb_msg, depth_msg;
         sensor_msgs::CameraInfoConstPtr camera_info_msg;
 
@@ -127,37 +130,46 @@ public:
                                                  rgb_msg,
                                                  camera_info_msg);
 
-        ROS_WARN_STREAM("depth image is filled, size: " << depth_msg->data.size());
+        //ROS_WARN_STREAM("depth image is filled, size: " << depth_msg->data.size());
 
-        config_and_detect_markers();
-        sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
+        try{
+            cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
+            _image = cv_ptr->image;
+            medianBlur(_image, _image, 3);
+            config_and_detect_markers(true);
+            sensor_msgs::PointCloud2 ptcl_msg = converter.get_pointcloud();
 
-        pcl::PointCloud<pcl::PointXYZRGBA>::Ptr
-                input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+            pcl::PointCloud<pcl::PointXYZRGBA>::Ptr
+                    input_cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
 
-        pcl::fromROSMsg(ptcl_msg, *input_cloud);
+            pcl::fromROSMsg(ptcl_msg, *input_cloud);
 
-        ROS_INFO_STREAM("getting basket pose, cloud size is: " << input_cloud->points.size());
-        if(!input_cloud->empty()){
-            std::vector<std::vector<double>> markers_positions;
+            //ROS_INFO_STREAM("getting basket pose, cloud size is: " << input_cloud->points.size());
+            if(!input_cloud->empty()){
+                std::vector<std::vector<double>> markers_positions;
 
-            for(size_t q = 0; q < _marker_center.size(); q++){
-                pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center[q](0)) + std::round(_marker_center[q](1)) * input_cloud->width);
+                for(size_t q = 0; q < _marker_center.size(); q++){
+                    pcl::PointXYZRGBA pt_basket = input_cloud->at(std::round(_marker_center[q](0)) + std::round(_marker_center[q](1)) * input_cloud->width);
 
-                                                                         if(pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z)
-                                                                         markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
+                                                                             if(pt_basket.x == pt_basket.x && pt_basket.y == pt_basket.y && pt_basket.z == pt_basket.z)
+                                                                             markers_positions.push_back({pt_basket.x, pt_basket.y, pt_basket.z});
 
-            }
-            std::vector<double> basket_in_robot_frame, basket_in_camera_frame = get_average_vector_vector(markers_positions);
-            if(!markers_positions.empty())
-               tf_base_conversion(basket_in_camera_frame, basket_in_robot_frame);
-            _basket_pose_stamped.header.stamp = ros::Time::now();
-            _basket_pose_stamped.pose.position.x = basket_in_robot_frame[0];
-            _basket_pose_stamped.pose.position.y = basket_in_robot_frame[1];
-            _basket_pose_stamped.pose.position.z = basket_in_robot_frame[2];
+                }
+                std::vector<double> basket_in_robot_frame, basket_in_camera_frame = get_average_vector_vector(markers_positions);
+                if(!markers_positions.empty())
+                   tf_base_conversion(basket_in_camera_frame, basket_in_robot_frame);
+                _basket_pose_stamped.header.stamp = ros::Time::now();
+                _basket_pose_stamped.pose.position.x = basket_in_robot_frame[0];
+                _basket_pose_stamped.pose.position.y = basket_in_robot_frame[1];
+                _basket_pose_stamped.pose.position.z = basket_in_robot_frame[2];
 
-            _basket_geometry_position_pub.publish(_basket_pose_stamped);
-            }
+                _basket_geometry_position_pub.publish(_basket_pose_stamped);
+                }
+        }
+        catch(...){
+            ROS_ERROR("something went wrong !!!");
+        }
+
 
     }
 
@@ -181,7 +193,7 @@ public:
             for(unsigned j = 1; j < working_copy.size(); j++)
                 if(largest_difference(working_copy[i], working_copy[j]) < _epsilon){
                     working_copy.erase(working_copy.begin() + j);
-                    _deleted_index.push_back(i);
+                    _deleted_index.push_back(j);
                 }
 
         }
@@ -195,7 +207,7 @@ public:
             ROS_ERROR("THE TRANSFORMATION IS IMPOSSIBLE, EMPTY VECTOR");
             return;
         }
-        ROS_INFO("Converting point into robot frame ...");
+        //ROS_INFO("Converting point into robot frame ...");
         tf::TransformListener listener;
         tf::StampedTransform stamped_transform;
         std::string child_frame = "/kinect2_rgb_optical_frame";
@@ -222,12 +234,12 @@ public:
 
         try{
             listener.transformPoint(parent_frame, camera_point, base_point);
-            ROS_INFO("kinect2_rgb_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
+            /*ROS_INFO("kinect2_rgb_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
                      camera_point.point.x, camera_point.point.y, camera_point.point.z,
-                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
+                     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());*/
         }
         catch(tf::TransformException& ex){
-            ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
+            //ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
         }
         object_pose_in_robot_frame.push_back(base_point.point.x);
         object_pose_in_robot_frame.push_back(base_point.point.y);
@@ -235,7 +247,8 @@ public:
     }
 
     void transfrom_record_all_points(){
-        ROS_WARN_STREAM("trying to transform and record, size of vector is: " << _ball_in_camera_frame.size());
+        ROS_WARN_STREAM("Trying to transform and record");
+        //ROS_WARN_STREAM("trying to transform and record, size of vector is: " << _ball_in_camera_frame.size());
         if(_ball_in_camera_frame.empty()){
             ROS_ERROR("NO DATA RECORDED, FAILED ITERATION !!!");
             return;
@@ -273,9 +286,12 @@ public:
     }
 
     //manipulate image to recognize the marker and draw a circle around the middle of the marker
-    void config_and_detect_markers(){
+    void config_and_detect_markers(bool special){
         _aruco_detector.setDictionary("ARUCO");
-        _aruco_detector.detect(_im, _markers, _camera_char, _marker_size);
+        if(!special)
+            _aruco_detector.detect(_im, _markers, _camera_char, _marker_size);
+        if(special)
+            _aruco_detector.detect(_image, _markers, _camera_char, _marker_size);
 
         if (!_markers.empty()){
             //ROS_WARN_STREAM("marker size is: " << _markers.size());
@@ -358,6 +374,7 @@ public:
     }
 
     void update(int i){
+        //ROS_WARN_STREAM("trying to process element no: " << i);
         _rgb_msg.reset(new sensor_msgs::Image(_rgb_topics_vector[i]));
         _depth_msg.reset(new sensor_msgs::Image(_depth_topics_vector[i]));
         _camera_info_msg.reset(new sensor_msgs::CameraInfo(_camera_info_topics_vector[i]));
@@ -401,7 +418,7 @@ public:
                 }
             }
 
-            config_and_detect_markers();
+            config_and_detect_markers(false);
             Mat drawing = Mat::zeros( threshold_output.size(), CV_8UC3 );
             if(contours.size() > 0 && largest_contour_index < contours.size()){
                 approxPolyDP( Mat(contours[largest_contour_index]),
@@ -454,17 +471,19 @@ public:
                             if(!markers_positions.empty())
                                 _basket_in_camera_frame.push_back(get_average_vector_vector(markers_positions));
                         }
+                        else
+                            _deleted_index.push_back(i);
                     }
+                    else
+                        _deleted_index.push_back(i);
                 }
                 else{
                     _valid_object = false;
-                    _gripper_status_vector.erase(_gripper_status_vector.begin() + i);
-                    _time_stamp_vector.erase(_time_stamp_vector.begin() + i);
+                    _deleted_index.push_back(i);
                 }
             }
             else{
-                _gripper_status_vector.erase(_gripper_status_vector.begin() + i);
-                _time_stamp_vector.erase(_time_stamp_vector.begin() + i);
+                _deleted_index.push_back(i);
             }
 
             _traj_images.push_back(_im);
@@ -476,6 +495,7 @@ public:
         }
         catch (...)
         {
+            _deleted_index.push_back(i);
             ROS_ERROR("Something went wrong !!!");
             if(_first_successful_iteration)
                 ROS_ERROR("Something went wrong !!!");
@@ -508,7 +528,7 @@ private:
     int _image_count;
     std_msgs::Float64MultiArray _ball_trajectory, _basket_position, _gripping_vector, _time_stamp_trajectory;
     cv_bridge::CvImagePtr _cv_ptr;
-    Mat _im, _im_hsv, _im_tennis_ball_hue;
+    Mat _im, _image, _im_hsv, _im_tennis_ball_hue;
     int _thresh = 100;
     Point2f _object_center;
 
@@ -533,7 +553,7 @@ int main(int argc, char **argv){
     ros::init(argc, argv, "blob_tracking_node");
     ros::NodeHandle n;
 
-    ros::Rate my_rate(40);
+    ros::Rate my_rate(30);
     Blob_detector my_detector;
     //    usleep(10e6);
     while(ros::ok()){
