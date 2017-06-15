@@ -36,16 +36,11 @@ public:
     }
 
     void init(){
-        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/camera/rgb/camera_info",
-                                                          "/camera/rgb/image_raw",
-                                                          "/camera/depth/camera_info",
-                                                          "/camera/depth/image_raw",
-                                                          _nh));
-        /*_images_sub.reset(new rgbd_utils::RGBD_Subscriber("/kinect2/qhd/camera_info",
+        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/kinect2/qhd/camera_info",
                                                           "/kinect2/qhd/image_color_rect",
                                                           "/kinect2/qhd/camera_info",
                                                           "/kinect2/qhd/image_depth_rect",
-                                                          _nh));*/
+                                                          _nh));
 
         _motion_status_sub = _nh.subscribe<std_msgs::Int16>("/baxter_throwing/status", 1, &Blob_detector::motion_status_cb, this);
         _gripper_release_sub = _nh.subscribe<baxter_core_msgs::EndEffectorState>
@@ -58,7 +53,7 @@ public:
         _time_stamp_pub = _nh.advertise<std_msgs::Float64MultiArray>("/trajectory_time_stamps", 1);
 
         //_camera_char.readFromXMLFile("/home/seungsu/devel/ws_baxter/src/blob_tracking/data/camera_param_baxter.xml");
-        _camera_char.readFromXMLFile("/home/ghanim/git/blob_tracking/data/camera_param_baxter.xml");
+        _camera_char.readFromXMLFile("/home/mukhtar/git/blob_tracking/data/camera_param_baxter.xml");
 
         _nh.getParam("/", _parameters);
         _lower_1 = std::stod(_parameters["lower_1"]);
@@ -72,7 +67,9 @@ public:
     }
 
     void motion_status_cb(const std_msgs::Int16::ConstPtr& status){
+        ROS_WARN_STREAM("received status message, value is: " << status->data);
         if(status->data == THROWING_STATUS_MOTION_START){
+            ROS_WARN_STREAM("received status data and recording now ");
             _starting_time = ros::Time::now().toSec();
             _syncronize_recording = true;
             _trajectory_finished = false;
@@ -174,7 +171,7 @@ public:
         //ROS_INFO("Converting point into robot frame ...");
         tf::TransformListener listener;
         tf::StampedTransform stamped_transform;
-        std::string child_frame = "/camera_rgb_optical_frame";
+        std::string child_frame = "/kinect2_rgb_optical_frame";
         std::string parent_frame = "/world";
         try{
             listener.lookupTransform(child_frame, parent_frame,
