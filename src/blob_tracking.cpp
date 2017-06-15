@@ -53,7 +53,11 @@ public:
         _time_stamp_pub = _nh.advertise<std_msgs::Float64MultiArray>("/trajectory_time_stamps", 1);
 
         //_camera_char.readFromXMLFile("/home/seungsu/devel/ws_baxter/src/blob_tracking/data/camera_param_baxter.xml");
-        _camera_char.readFromXMLFile("/home/mukhtar/git/blob_tracking/data/camera_param_baxter.xml");
+        //_camera_char.readFromXMLFile("/home/mukhtar/git/blob_tracking/data/camera_param_baxter.xml");
+        std::string camera_file_path;
+        _nh.getParam("/camera_file_path", camera_file_path);
+        _nh.getParam("/output_file_path", _output_file_path);
+        _camera_char.readFromXMLFile(camera_file_path);
 
         _nh.getParam("/", _parameters);
         _lower_1 = std::stod(_parameters["lower_1"]);
@@ -64,6 +68,7 @@ public:
         _upper_3 = std::stod(_parameters["upper_3"]);
         _radius_threshold = std::stod(_parameters["radius"]);
         _first_successful_iteration = false;
+        _trajectory_index = 0;
     }
 
     void motion_status_cb(const std_msgs::Int16::ConstPtr& status){
@@ -81,7 +86,7 @@ public:
         if(status->data == THROWING_STATUS_MOTION_END){
             _trajectory_finished = true;
             //for(size_t i = 1; i < _gripper_status_vector.size(); i++)
-              //  ROS_INFO_STREAM("for raw data from gripping status vector, element: " << i << " is: " << _gripper_status_vector[i]);
+            //  ROS_INFO_STREAM("for raw data from gripping status vector, element: " << i << " is: " << _gripper_status_vector[i]);
             do_post_traj_processing();
         }
 
@@ -198,12 +203,12 @@ public:
 
             try{
                 listener.transformPoint(parent_frame, camera_point[i], base_point[i]);
-                /*ROS_INFO("kinect2_rgb_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
-                         camera_point[i].point.x, camera_point[i].point.y, camera_point[i].point.z,
-                         base_point[i].point.x, base_point[i].point.y, base_point[i].point.z, base_point[i].header.stamp.toSec());*/
+//                ROS_INFO("kinect2_rgb_optical_frame: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
+//                         camera_point[i].point.x, camera_point[i].point.y, camera_point[i].point.z,
+//                         base_point[i].point.x, base_point[i].point.y, base_point[i].point.z, base_point[i].header.stamp.toSec());
             }
             catch(tf::TransformException& ex){
-                //ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
+//                ROS_ERROR("Received an exception trying to transform a point from \"camera_depth_optical_frame\" to \"world\": %s", ex.what());
             }
             object_pose_in_robot_frame[i] = {base_point[i].point.x, base_point[i].point.y, base_point[i].point.z};
         }
@@ -252,6 +257,19 @@ public:
         object_pose_in_robot_frame.push_back(base_point.point.x);
         object_pose_in_robot_frame.push_back(base_point.point.y);
         object_pose_in_robot_frame.push_back(base_point.point.z);
+    }
+
+    void record_ball_trajectory(double p_x, double p_y, double p_z,
+                                    double time_stamp, bool gripper_status, double basket_x, double basket_y, double basket_z){
+            //ROS_WARN("Recording :):)");
+            _output_file << p_x << ","
+                         << p_y << ","
+                         << p_z << ","
+                         << time_stamp << ","
+                         << gripper_status << ","
+                         << basket_x << ","
+                         << basket_y << ","
+                         << basket_z << "\n";
     }
 
     void transfrom_record_all_points(){
@@ -315,25 +333,67 @@ public:
     }
 
     void transform_and_reinitialize(){
+        _feedback_vector.clear();
+        _output_file.open(_output_file_path + "ball_trajectory_robot_frame_" + std::to_string(_trajectory_index) + ".csv");
         transfrom_record_all_points();
+
         for(size_t i = 0; i < _ball_in_robot_frame.size(); i++){
             _ball_trajectory.data.push_back(_ball_in_robot_frame[i][0]);
             _ball_trajectory.data.push_back(_ball_in_robot_frame[i][1]);
             _ball_trajectory.data.push_back(_ball_in_robot_frame[i][2]);
+            _feedback_vector.push_back({_ball_in_robot_frame[i][0],
+                                        _ball_in_robot_frame[i][1],
+                                        _ball_in_robot_frame[i][2],
+                                        _time_stamp_vector[i],
+                                        _gripper_status_final_vector[i],
+                                        _basket_in_robot_frame_average[0],
+                                        _basket_in_robot_frame_average[1],
+                                        _basket_in_robot_frame_average[2]});
+            /*_feedback_vector[i].push_back(_ball_in_robot_frame[i][0]);
+            _feedback_vector[i].push_back(_ball_in_robot_frame[i][1]);
+            _feedback_vector[i].push_back(_ball_in_robot_frame[i][2]);
+            //when basket position is there fill it
+            if(!_basket_in_robot_frame_average.empty()){
+                _feedback_vector[i].push_back(_basket_in_robot_frame_average[0]);
+                _feedback_vector[i].push_back(_basket_in_robot_frame_average[1]);
+                _feedback_vector[i].push_back(_basket_in_robot_frame_average[2]);
+            }
+            //no basket here so fill with zeros
+            else{
+                _feedback_vector[i].push_back(0);
+                _feedback_vector[i].push_back(0);
+                _feedback_vector[i].push_back(0);
+            }*/
+        }
+
+        for(size_t i = 0; i < _time_stamp_vector.size(); i++){
+            _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
+            //_feedback_vector[i].push_back(_time_stamp_vector[i]);
+        }
+
+        for(size_t i = 0; i < _gripper_status_final_vector.size(); i++){
+            _gripping_vector.data.push_back(_gripper_status_final_vector[i]);
+            //_feedback_vector[i].push_back(_gripper_status_final_vector[i]);
         }
 
         for(size_t i = 0; i < _basket_in_robot_frame_average.size(); i++){
             _basket_position.data.push_back(_basket_in_robot_frame_average[i]);
         }
 
-        for(size_t i = 0; i < _gripper_status_final_vector.size(); i++){
-            _gripping_vector.data.push_back(_gripper_status_final_vector[i]);
+        ROS_WARN_STREAM("I am recording in file, size is: " << _feedback_vector.size());
+        for(size_t i = 0; i < _feedback_vector.size(); i++){
+            if(_feedback_vector[i].size() < 7)
+                ROS_WARN("problem with vector size :(:(:(");
+            else{
+                //ROS_WARN_STREAM("I am recording in file, size is: " << _feedback_vector[i].size());
+                record_ball_trajectory(_feedback_vector[i][0], _feedback_vector[i][1], _feedback_vector[i][2],
+                        _feedback_vector[i][3], _feedback_vector[i][4],
+                        _feedback_vector[i][5], _feedback_vector[i][6], _feedback_vector[i][7]);
+            }
         }
 
-        for(size_t i = 0; i < _time_stamp_vector.size(); i++){
-            _time_stamp_trajectory.data.push_back(_time_stamp_vector[i]);
-        }
-
+        _output_file.close();
+        _trajectory_index += 1;
         _ball_trajectory_pub.publish(_ball_trajectory);
         _basket_position_pub.publish(_basket_position);
         _gripping_pub.publish(_gripping_vector);
@@ -514,14 +574,17 @@ private:
     Mat _im, _image, _im_hsv, _im_tennis_ball_hue;
     Point2f _object_center;
 
-    std::vector<std::vector<double>> _ball_in_camera_frame, _basket_in_camera_frame,
+    std::vector<std::vector<double>> _ball_in_camera_frame, _basket_in_camera_frame, _feedback_vector,
     _ball_in_robot_frame, _basket_in_robot_frame;
     std::vector<double> _time_stamp_vector, _basket_in_camera_frame_average, _basket_in_robot_frame_average, _saved_index;
     std::vector<bool>_gripper_status_vector, _gripper_status_final_vector;
 
+    int _trajectory_index;
     double _lower_1, _lower_2, _lower_3, _upper_1, _upper_2, _upper_3, _starting_time = 0;
     float _radius_threshold, _marker_size = 0.12;
     bool _valid_object, _gripper_status = false, _first_successful_iteration, _trajectory_finished, _syncronize_recording = false;
+    std::ofstream _output_file;
+    std::string _output_file_path;
 };
 
 int main(int argc, char **argv){

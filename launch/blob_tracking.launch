@@ -1,12 +1,12 @@
-<launch>  
+<launch>
   <include file="$(find kinect2_bridge)/launch/kinect2_bridge.launch">
-    <!-- These args are workarounds for tf_prefix issues in freenect.launch -->
-    <!--arg name="depth_method" value="opencl"/-->
     <arg name="publish_tf" value="true"/>
   </include>
 
-  <arg name="camera_link_pose" default="0.98 -0.220 1.861 0.149208 0.0305302 -3.3"/>
- 
+  <param name="output_file_path" value="$(find blob_tracking)/trajectory_feedback/" />
+  <param name="camera_file_path" value="$(find blob_tracking)/data/camera_param_baxter.xml" />
+
+  <arg name="camera_link_pose" default="0.98 -0.220 1.861 0.149208 0.0305302 -3.3"/> 
   <node name="statict_transform" pkg="tf" type="static_transform_publisher" args=" $(arg camera_link_pose) /world /kinect2_link 100"/>
  
   <rosparam command="load" file="$(find blob_tracking)/launch/params/global_params.yml"/>
