@@ -36,10 +36,15 @@ public:
     }
 
     void init(){
-        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/kinect2/qhd/camera_info",
-                                                          "/kinect2/qhd/image_color_rect",
-                                                          "/kinect2/qhd/camera_info",
-                                                          "/kinect2/qhd/image_depth_rect",
+//        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/kinect2/qhd/camera_info",
+//                                                          "/kinect2/qhd/image_color_rect",
+//                                                          "/kinect2/qhd/camera_info",
+//                                                          "/kinect2/qhd/image_depth_rect",
+//                                                          _nh));
+        _images_sub.reset(new rgbd_utils::RGBD_Subscriber("/camera/rgb/camera_info",
+                                                          "/camera/rgb/image_color",
+                                                          "/camera/depth/camera_info",
+                                                          "/camera/depth/image_raw",
                                                           _nh));
 
         _motion_status_sub = _nh.subscribe<std_msgs::Int16>("/baxter_throwing/status", 1, &Blob_detector::motion_status_cb, this);
@@ -416,6 +421,7 @@ public:
     void save_topics(){
         //ROS_WARN_STREAM("I am recording gripper status, and the state is: " << _gripper_status);
         if(_syncronize_recording){
+            ROS_WARN_STREAM("depth topic size is: " << _images_sub->get_rgb().data.size());
             _rgb_topics_vector.push_back(_images_sub->get_rgb());
             _depth_topics_vector.push_back(_images_sub->get_depth());
             _camera_info_topics_vector.push_back(_images_sub->get_rgb_info());
@@ -428,6 +434,7 @@ public:
     }
 
     void update(int i){
+        ROS_INFO_STREAM("I am updating :) iteration: " << i);
         _rgb_msg.reset(new sensor_msgs::Image(_rgb_topics_vector[i]));
         _depth_msg.reset(new sensor_msgs::Image(_depth_topics_vector[i]));
         _camera_info_msg.reset(new sensor_msgs::CameraInfo(_camera_info_topics_vector[i]));
@@ -532,6 +539,8 @@ public:
             _traj_images.push_back(_im);
 
             /// Show in a window
+            cv::namedWindow("Mask image", cv::WINDOW_AUTOSIZE);
+            cv::imshow("Mask image", _im_hsv);
             cv::namedWindow("Original image", cv::WINDOW_AUTOSIZE);
             cv::imshow("Original image", _im);
             waitKey(1);
